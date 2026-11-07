@@ -390,7 +390,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
           <button
             type="button"
             onClick={async () => {
-              await flushDirtyNotesIfNeeded();
+              if (!(await flushDirtyNotesIfNeeded())) return;
               onClose();
             }}
             className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer shrink-0 focus-ring"
@@ -415,7 +415,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                 type="button"
                 aria-pressed={active}
                 onClick={async () => {
-                  await flushDirtyNotesIfNeeded();
+                  if (!(await flushDirtyNotesIfNeeded())) return;
                   onStatusChange(word.id, word.word, st);
                 }}
                 title={`快捷键 ${keyHint}: 设为${meta.label}`}
@@ -442,7 +442,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
             <button
               type="button"
               onClick={async () => {
-                await flushDirtyNotesIfNeeded();
+                if (!(await flushDirtyNotesIfNeeded())) return;
                 onStudyTouch(word.id, word.word);
               }}
               className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer transition-colors focus-ring shrink-0"
@@ -909,7 +909,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
       <div
         className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex flex-col justify-end md:flex-row md:justify-end xl:static xl:inset-auto xl:z-20 xl:bg-transparent xl:backdrop-blur-none xl:block xl:w-[360px] 2xl:w-[390px] xl:shrink-0 xl:h-full"
         onClick={async () => {
-          await flushDirtyNotesIfNeeded();
+          if (!(await flushDirtyNotesIfNeeded())) return;
           onClose();
         }}
       >
@@ -932,7 +932,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
     <div
       className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] flex flex-col justify-end md:flex-row md:justify-end"
       onClick={async () => {
-        await flushDirtyNotesIfNeeded();
+        if (!(await flushDirtyNotesIfNeeded())) return;
         onClose();
       }}
     >
