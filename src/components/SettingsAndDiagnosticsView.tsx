@@ -3,10 +3,13 @@ import {
   Download,
   Upload,
   CheckCircle2,
+  AlertTriangle,
   Search,
   Plus,
   Trash2,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   DataDiagnosticItem,
@@ -29,6 +32,7 @@ interface SettingsAndDiagnosticsViewProps {
     importedWords: number;
     importedLogs: number;
     importedCollections: number;
+    importedCustomDatasets?: number;
   }>;
   onUploadCustomDataset: (
     type: 'cet2016' | 'bnc_coca',
@@ -55,7 +59,10 @@ const CATEGORY_LABELS: Record<DataDiagnosticItem['category'], string> = {
   sum_mismatch: '词族频次校验差',
   zero_frequency: '零频次衍生词',
   unmatched_cet: '大纲未进25k词',
+  multi_family_member: '跨词族多重归属',
 };
+
+const DIAG_PAGE_SIZE = 100;
 
 export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProps> = ({
   diagnostics,
@@ -79,7 +86,14 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
     'backup'
   );
   const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge');
-  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [pendingOverwritePayload, setPendingOverwritePayload] = useState<{
+    fileName: string;
+    jsonText: string;
+  } | null>(null);
   const [datasetStatus, setDatasetStatus] = useState<string | null>(null);
 
   // Custom dictionary form
@@ -90,18 +104,54 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
   // Diagnostics filter
   const [diagSearch, setDiagSearch] = useState('');
   const [diagCategory, setDiagCategory] = useState<string>('all');
+  const [diagPage, setDiagPage] = useState(0);
+
+  const executeBackupImport = async (jsonText: string, mode: 'merge' | 'overwrite') => {
+    try {
+      const res = await onImportBackupJson(jsonText, mode);
+      setImportStatus({
+        type: 'success',
+        text: `恢复成功：导入 ${res.importedWords} 条词汇状态、${res.importedCollections} 个词集、${res.importedLogs} 条日志${
+          res.importedCustomDatasets ? `、${res.importedCustomDatasets} 份自定义词表` : ''
+        }`,
+      });
+      setPendingOverwritePayload(null);
+    } catch (err) {
+      setImportStatus({
+        type: 'error',
+        text: err instanceof Error ? `导入失败：${err.message}` : '导入失败',
+      });
+    }
+  };
 
   const handleBackupFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
-      const res = await onImportBackupJson(text, importMode);
-      setImportStatus(
-        `恢复成功：导入 ${res.importedWords} 条词汇状态、${res.importedCollections} 个词集、${res.importedLogs} 条日志`
-      );
+      // Pre-validate JSON before prompting or importing
+      const parsed = JSON.parse(text);
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        (!Array.isArray(parsed.userWords) &&
+          !Array.isArray(parsed.collections) &&
+          !Array.isArray(parsed.activityLogs))
+      ) {
+        throw new Error('备份文件缺少必要的词库表结构 (userWords / collections / activityLogs)');
+      }
+
+      if (importMode === 'overwrite') {
+        setPendingOverwritePayload({ fileName: file.name, jsonText: text });
+        setImportStatus(null);
+      } else {
+        await executeBackupImport(text, 'merge');
+      }
     } catch (err) {
-      setImportStatus(err instanceof Error ? `导入失败：${err.message}` : '导入失败');
+      setImportStatus({
+        type: 'error',
+        text: err instanceof Error ? `文件校验失败：${err.message}` : '备份文件格式错误',
+      });
     } finally {
       e.target.value = '';
     }
@@ -156,6 +206,13 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
       return true;
     });
   }, [diagnostics.items, diagSearch, diagCategory]);
+
+  const totalDiagPages = Math.max(1, Math.ceil(filteredDiagnostics.length / DIAG_PAGE_SIZE));
+  const safeDiagPage = Math.min(diagPage, totalDiagPages - 1);
+  const pagedDiagnostics = useMemo(() => {
+    const start = safeDiagPage * DIAG_PAGE_SIZE;
+    return filteredDiagnostics.slice(start, start + DIAG_PAGE_SIZE);
+  }, [filteredDiagnostics, safeDiagPage]);
 
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
@@ -220,7 +277,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
           </div>
 
           <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-            个人学习状态、标签、助记笔记、词集与变更历史全部保存在本地浏览器 IndexedDB 中。建议定期导出 JSON 备份以便跨设备迁移。
+            个人学习状态、标签、助记笔记、词集、变更历史及自定义词表全部保存在本地浏览器 IndexedDB 中。支持导出完整 JSON 备份并跨设备恢复。
           </p>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -247,17 +304,26 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
 
           <div className="flex items-center justify-between text-xs pt-1">
             <span className="text-[var(--text-muted)]">导入冲突策略:</span>
-            <div className="flex items-center gap-2">
-              <label className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]">
+            <div className="flex items-center gap-2.5">
+              <label
+                className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]"
+                title="按更新时间保留最新学习状态，并自动合并标签与笔记"
+              >
                 <input
                   type="radio"
                   name="import-mode"
                   checked={importMode === 'merge'}
-                  onChange={() => setImportMode('merge')}
+                  onChange={() => {
+                    setImportMode('merge');
+                    setPendingOverwritePayload(null);
+                  }}
                 />
-                <span>智能合并</span>
+                <span>保守合并</span>
               </label>
-              <label className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]">
+              <label
+                className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]"
+                title="清空当前设备记录并用备份文件完全替换"
+              >
                 <input
                   type="radio"
                   name="import-mode"
@@ -269,10 +335,47 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
             </div>
           </div>
 
+          {pendingOverwritePayload && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded space-y-2 text-xs text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-1.5 font-semibold">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <span>
+                  确认使用「{pendingOverwritePayload.fileName}」完全覆盖本地数据？此操作将清空当前浏览器现有的全部学习记录。
+                </span>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingOverwritePayload(null)}
+                  className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeBackupImport(pendingOverwritePayload.jsonText, 'overwrite')}
+                  className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-semibold cursor-pointer"
+                >
+                  确认清空并覆盖
+                </button>
+              </div>
+            </div>
+          )}
+
           {importStatus && (
-            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-              <span>{importStatus}</span>
+            <div
+              className={`p-2.5 border rounded text-xs flex items-center gap-1.5 ${
+                importStatus.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              {importStatus.type === 'success' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{importStatus.text}</span>
             </div>
           )}
         </div>
@@ -390,7 +493,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
               </div>
             </div>
             <div className="p-2.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded">
-              <div className="text-[10px] text-[var(--text-muted)]">大纲与BNC交集词</div>
+              <div className="text-[10px] text-[var(--text-muted)]">大纲与BNC直接匹配</div>
               <div className="text-sm font-bold text-[var(--text-primary)]">
                 {diagnostics.bothCetAndBncCount.toLocaleString()}
               </div>
@@ -453,14 +556,20 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
                 <input
                   type="text"
                   value={diagSearch}
-                  onChange={(e) => setDiagSearch(e.target.value)}
+                  onChange={(e) => {
+                    setDiagSearch(e.target.value);
+                    setDiagPage(0);
+                  }}
                   placeholder="检索原始词条或拆解结果..."
                   className="w-full sm:w-44 pl-7 pr-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
               <select
                 value={diagCategory}
-                onChange={(e) => setDiagCategory(e.target.value)}
+                onChange={(e) => {
+                  setDiagCategory(e.target.value);
+                  setDiagPage(0);
+                }}
                 aria-label="诊断类别过滤"
                 className="px-2 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-secondary)] focus:outline-none shrink-0"
               >
@@ -576,7 +685,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
         ) : (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {/* Diagnostics Table Header */}
-            <div className="grid grid-cols-[88px_minmax(100px,1.1fr)_minmax(120px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[88px_minmax(90px,1.1fr)_minmax(110px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
               <div>诊断规则</div>
               <div>源文件词目文本</div>
               <div>规范化拆解词形</div>
@@ -584,10 +693,10 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-              {filteredDiagnostics.slice(0, 300).map((item) => (
+              {pagedDiagnostics.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-[88px_minmax(100px,1.1fr)_minmax(120px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-4 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
+                  className="grid grid-cols-[88px_minmax(90px,1.1fr)_minmax(110px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
                 >
                   <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] whitespace-nowrap pr-2">
                     {CATEGORY_LABELS[item.category]}
@@ -633,6 +742,39 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
                 </div>
               ))}
             </div>
+
+            {totalDiagPages > 1 && (
+              <div className="h-9 px-4 sm:px-5 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between text-xs font-mono-tabular text-[var(--text-secondary)] shrink-0">
+                <span>
+                  显示 {safeDiagPage * DIAG_PAGE_SIZE + 1}–
+                  {Math.min((safeDiagPage + 1) * DIAG_PAGE_SIZE, filteredDiagnostics.length)} / 共{' '}
+                  {filteredDiagnostics.length.toLocaleString()} 条
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safeDiagPage === 0}
+                    onClick={() => setDiagPage((p) => Math.max(0, p - 1))}
+                    className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 inline-flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    上一页
+                  </button>
+                  <span>
+                    {safeDiagPage + 1} / {totalDiagPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeDiagPage >= totalDiagPages - 1}
+                    onClick={() => setDiagPage((p) => Math.min(totalDiagPages - 1, p + 1))}
+                    className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 inline-flex items-center gap-0.5 cursor-pointer"
+                  >
+                    下一页
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

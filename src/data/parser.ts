@@ -1,6 +1,7 @@
 import {
   BncCocaFamily,
   BncCocaMember,
+  BncFamilyMembership,
   CetMemberItem,
   CetOfficialEntry,
   CetWordReference,
@@ -512,6 +513,17 @@ export function buildLexiconDatabase(
   for (const family of bncFamilies) {
     for (const member of family.members) {
       const existing = wordsMap.get(member.normalized);
+      const membership: BncFamilyMembership = {
+        familyId: family.id,
+        headword: family.headword,
+        band: family.band,
+        bandNumber: family.bandNumber,
+        frequency: member.frequency,
+        familyFrequency: family.totalFrequency,
+        isHeadword: member.isHeadword,
+        isZeroFrequency: member.isZeroFrequency,
+      };
+
       if (!existing) {
         wordsMap.set(member.normalized, {
           id: member.normalized,
@@ -521,6 +533,8 @@ export function buildLexiconDatabase(
           hasCapitalVariant: member.word !== member.normalized,
           displayVariants: [member.word],
           inBnc: true,
+          hasExactBncForm: true,
+          bncLinkedViaVariant: false,
           familyId: family.id,
           headword: family.headword,
           band: family.band,
@@ -530,6 +544,7 @@ export function buildLexiconDatabase(
           isHeadword: member.isHeadword,
           familyMemberCount: family.members.length,
           familyCetMemberCount: 0,
+          bncMemberships: [membership],
           matchType: 'exact',
           matchConfidence: 'high',
           matchNote: '精确匹配 BNC/COCA 词族成员词形',
@@ -542,6 +557,19 @@ export function buildLexiconDatabase(
           cetRefs: [],
           homographNumbers: [],
         });
+      } else {
+        existing.bncMemberships = [...(existing.bncMemberships || []), membership];
+        diagnostics.push({
+          id: `bnc_multifam_${member.normalized}_${family.id}`,
+          source: 'BNC_COCA',
+          severity: 'info',
+          category: 'multi_family_member',
+          rawText: member.word,
+          parsedResult: existing.bncMemberships.map(
+            (m) => `${m.headword} (${m.band}, 词形频次 ${m.frequency.toLocaleString()})`
+          ),
+          explanation: `词形 "${member.word}" 在 BNC/COCA 中归属多个词族：主词族 "${existing.headword}" (${existing.band}, 频次 ${existing.formFrequency}) 与 "${family.headword}" (${family.band}, 频次 ${member.frequency})。`,
+        });
       }
     }
   }
@@ -550,6 +578,7 @@ export function buildLexiconDatabase(
   let cetTotalExpandedForms = 0;
   const cetDistinctSet = new Set<string>();
   let cetUnmatchedInBncCount = 0;
+  let cetVariantLinkedCount = 0;
 
   for (const entry of cetEntries) {
     // Collect all expanded forms on this line for peer reference
@@ -615,10 +644,24 @@ export function buildLexiconDatabase(
 
           if (fallbackBncMatch) {
             // Matched via deterministic UK/US variant or slash abbreviation on the same CET member!
-            const { family, member: bncMem, viaForm, rule } = fallbackBncMatch;
+            // CRITICAL: Never copy sibling formFrequency! This word form is NOT independently in BNC/COCA.
+            cetVariantLinkedCount++;
+            const { family, viaForm, rule } = fallbackBncMatch;
             const isAbbrev =
               rule === 'slash_parallel' &&
-              (norm === 'apt.' || norm === 'bbq' || norm === 'tv' || norm === 'ad' || norm === 'demo' || norm === 'dorm' || norm === 'flu' || norm === 'lab' || norm === 'memo' || norm === 'tech' || norm === 'phone' || norm === 'fridge' || norm === 'bike');
+              (norm === 'apt.' ||
+                norm === 'bbq' ||
+                norm === 'tv' ||
+                norm === 'ad' ||
+                norm === 'demo' ||
+                norm === 'dorm' ||
+                norm === 'flu' ||
+                norm === 'lab' ||
+                norm === 'memo' ||
+                norm === 'tech' ||
+                norm === 'phone' ||
+                norm === 'fridge' ||
+                norm === 'bike');
 
             wordItem = {
               id: norm,
@@ -627,19 +670,22 @@ export function buildLexiconDatabase(
               isPhrase: form.includes(' '),
               hasCapitalVariant: form !== norm,
               displayVariants: member.expandedForms,
-              inBnc: true,
+              inBnc: false,
+              hasExactBncForm: false,
+              bncLinkedViaVariant: true,
               familyId: family.id,
               headword: family.headword,
               band: family.band,
               bandNumber: family.bandNumber,
-              formFrequency: bncMem.frequency,
+              formFrequency: null, // CRITICAL: Do NOT borrow sibling variant's frequency!
               familyFrequency: family.totalFrequency,
-              isHeadword: bncMem.isHeadword,
+              isHeadword: false,
               familyMemberCount: family.members.length,
               familyCetMemberCount: 0,
+              bncMemberships: [],
               matchType: isAbbrev ? 'abbreviation_expansion' : 'uk_us_variant',
               matchConfidence: 'high',
-              matchNote: `通过官方同条变体 "${viaForm}" (${member.rawText}) 关联至 BNC/COCA 词族 ${family.headword}`,
+              matchNote: `关联至 ${family.headword} 词族（通过官方同条变体 "${viaForm}"）；该词形在 BNC/COCA 中无独立频次记录`,
               relatedPhraseCoreWord: phraseCore,
               inCet: true,
               isCet4: false,
@@ -673,6 +719,8 @@ export function buildLexiconDatabase(
               hasCapitalVariant: form !== norm,
               displayVariants: member.expandedForms,
               inBnc: false,
+              hasExactBncForm: false,
+              bncLinkedViaVariant: false,
               familyId: null,
               headword: null,
               band: null,
@@ -682,6 +730,7 @@ export function buildLexiconDatabase(
               isHeadword: false,
               familyMemberCount: null,
               familyCetMemberCount: 0,
+              bncMemberships: [],
               matchType: phraseCore ? 'phrase_reference' : 'unmatched',
               matchConfidence: phraseCore ? 'medium' : 'none',
               matchNote: phraseCore
@@ -773,8 +822,8 @@ export function buildLexiconDatabase(
         w.familyCetMemberCount = fam.cetMemberCount;
       }
     }
-    if (w.inCet && w.inBnc) bothCetAndBncCount++;
-    else if (w.inCet && !w.inBnc) cetOnlyCount++;
+    if (w.inCet && (w.inBnc || w.bncLinkedViaVariant)) bothCetAndBncCount++;
+    else if (w.inCet && !w.inBnc && !w.bncLinkedViaVariant) cetOnlyCount++;
     else if (!w.inCet && w.inBnc) bncOnlyCount++;
   }
 
@@ -805,9 +854,11 @@ export function buildLexiconDatabase(
     cetPhraseCount,
     cetAmbiguousCount,
     cetUnmatchedInBncCount,
+    cetVariantLinkedCount,
     bncTotalLines,
     bncFamilyCount: bncFamilies.length,
     bncTotalWordForms,
+    bncDistinctWordForms: bncFormIndex.size,
     bncZeroFreqFormCount,
     bncSumMismatchCount,
     bncBandsCount: distinctBands,
@@ -826,3 +877,4 @@ export function buildLexiconDatabase(
     diagnostics: report,
   };
 }
+

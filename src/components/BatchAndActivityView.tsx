@@ -7,6 +7,9 @@ import {
   Check,
   Search,
   Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import {
   ActivityLogEntry,
@@ -47,12 +50,13 @@ const SAMPLE_BATCH_TEXT = `able\t已掌握\t核心词,高频\t基础四级词
 abilities
 owing to\t学习中\t短语搭配\t注意后接名词或动名词
 baby boom\t待学\t阅读高频
-appropriate\t学习中\t同形异义词\t区分形容词与动词用法
+"appropriate","学习中","同形异义词,重点","区分形容词与动词用法, 含逗号CSV示例"
 advisor\t已掌握\t英美变体
 colour
 accountancy\t待学\t派生词`;
 
 const ALL_STATUSES: LearningStatus[] = ['queued', 'learning', 'mastered', 'deferred', 'unrated'];
+const LOGS_PAGE_SIZE = 100;
 
 export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
   words,
@@ -78,9 +82,11 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
     batchId: string;
     updatedCount: number;
   } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [logSearch, setLogSearch] = useState('');
   const [logTypeFilter, setLogTypeFilter] = useState<string>('all');
+  const [logPage, setLogPage] = useState(0);
 
   const parsedRows = useMemo(() => {
     return parseBatchInputText(rawInput, wordsMap, words);
@@ -118,6 +124,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
   };
 
   const handleCommitBatch = async () => {
+    setActionError(null);
     const itemsToUpdate: {
       wordId: string;
       word: string;
@@ -173,6 +180,13 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
       return true;
     });
   }, [activityLogs, logSearch, logTypeFilter]);
+
+  const totalLogPages = Math.max(1, Math.ceil(filteredLogs.length / LOGS_PAGE_SIZE));
+  const safeLogPage = Math.min(logPage, totalLogPages - 1);
+  const pagedLogs = useMemo(() => {
+    const start = safeLogPage * LOGS_PAGE_SIZE;
+    return filteredLogs.slice(start, start + LOGS_PAGE_SIZE);
+  }, [filteredLogs, safeLogPage]);
 
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
@@ -231,7 +245,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
               批量词表同步与导入
             </h2>
             <p className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate">
-              支持单列词表或 Tab 分隔（词条 / 状态 / 标签 / 笔记）
+              支持单列词表、Tab 分隔 (TSV) 或标准 CSV（词条 / 状态 / 标签 / 笔记）
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -268,7 +282,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
               setRightTab('preview');
             }}
             rows={9}
-            placeholder={`每行一个单词或词组，例如：\nable\t已掌握\t核心词\t基础四级词\nowing to\t学习中\nbaby boom`}
+            placeholder={`每行一个单词或词组，支持 TSV 或标准 CSV：\nable\t已掌握\t核心词\t基础四级词\n"appropriate","学习中","同形词,高频","区分形容词与动词"\nowing to\t学习中\nbaby boom`}
             className="w-full flex-1 min-h-[150px] p-3 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] resize-y leading-relaxed"
           />
 
@@ -346,13 +360,35 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
               <button
                 type="button"
                 onClick={async () => {
-                  await onRollbackBatch(lastBatchResult.batchId);
-                  setLastBatchResult(null);
+                  try {
+                    setActionError(null);
+                    await onRollbackBatch(lastBatchResult.batchId);
+                    setLastBatchResult(null);
+                  } catch (err) {
+                    setActionError(err instanceof Error ? err.message : '回滚失败');
+                  }
                 }}
                 className="inline-flex items-center gap-1 font-semibold underline whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Undo2 className="w-3 h-3" />
                 撤销此批次
+              </button>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded flex items-start justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+              <div className="flex items-start gap-1.5 min-w-0">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{actionError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0 cursor-pointer"
+                aria-label="关闭错误提示"
+              >
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
@@ -421,7 +457,10 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                 <input
                   type="text"
                   value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
+                  onChange={(e) => {
+                    setLogSearch(e.target.value);
+                    setLogPage(0);
+                  }}
                   placeholder="筛选变更词条或来源..."
                   className="w-full sm:w-44 pl-7 pr-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
@@ -429,7 +468,10 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
               <div className="flex items-center gap-1.5 shrink-0">
                 <select
                   value={logTypeFilter}
-                  onChange={(e) => setLogTypeFilter(e.target.value)}
+                  onChange={(e) => {
+                    setLogTypeFilter(e.target.value);
+                    setLogPage(0);
+                  }}
                   aria-label="变更类型过滤"
                   className="px-2 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-secondary)] focus:outline-none"
                 >
@@ -438,6 +480,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                   <option value="batch_import">批量同步</option>
                   <option value="tags_change">标签更新</option>
                   <option value="note_change">笔记更新</option>
+                  <option value="study_touch">复习打卡</option>
                 </select>
                 <button
                   type="button"
@@ -452,11 +495,28 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
           )}
         </div>
 
+        {/* Inline conflict error banner for logs pane */}
+        {actionError && rightTab === 'logs' && (
+          <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-800/60 flex items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{actionError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionError(null)}
+              className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Tab Content */}
         {rightTab === 'preview' ? (
           <>
             {/* 5-Column Preview Table Header */}
-            <div className="grid grid-cols-[28px_minmax(80px,1fr)_minmax(110px,1.3fr)_76px_74px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[24px_minmax(68px,1fr)_minmax(96px,1.3fr)_66px_64px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
               <div>纳入</div>
               <div>输入原词</div>
               <div>匹配词条与消歧</div>
@@ -484,7 +544,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                   return (
                     <div
                       key={idx}
-                      className={`grid grid-cols-[28px_minmax(80px,1fr)_minmax(110px,1.3fr)_76px_74px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-4 sm:px-5 py-2.5 text-xs transition-colors ${
+                      className={`grid grid-cols-[24px_minmax(68px,1fr)_minmax(96px,1.3fr)_66px_64px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 py-2.5 text-xs transition-colors ${
                         isExcluded ? 'opacity-45 bg-[var(--bg-canvas)]' : 'hover:bg-[var(--bg-hover)]'
                       }`}
                     >
@@ -590,7 +650,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
         ) : (
           <>
             {/* Activity Ledger Table Header */}
-            <div className="grid grid-cols-[84px_1fr_92px_56px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[78px_1fr_84px_48px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
               <div>时间</div>
               <div>词条</div>
               <div>变更内容</div>
@@ -599,17 +659,17 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-              {filteredLogs.length === 0 ? (
+              {pagedLogs.length === 0 ? (
                 <div className="p-12 text-center text-xs text-[var(--text-muted)]">
                   暂无学习变更记录
                 </div>
               ) : (
-                filteredLogs.slice(0, 250).map((log) => {
+                pagedLogs.map((log) => {
                   const wordObj = wordsMap.get(log.wordId);
                   return (
                     <div
                       key={log.id}
-                      className="grid grid-cols-[84px_1fr_92px_56px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-4 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
+                      className="grid grid-cols-[78px_1fr_84px_48px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
                     >
                       <div className="font-mono-tabular text-[11px] text-[var(--text-muted)] whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString('zh-CN', {
@@ -643,6 +703,8 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                           </span>
                         ) : log.actionType === 'tags_change' ? (
                           <span>标签更新</span>
+                        ) : log.actionType === 'study_touch' ? (
+                          <span className="text-emerald-700 dark:text-emerald-400">复习打卡</span>
                         ) : (
                           <span>笔记更新</span>
                         )}
@@ -656,7 +718,14 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                         {log.id !== undefined && (
                           <button
                             type="button"
-                            onClick={() => onUndoSingleLog(log.id!)}
+                            onClick={async () => {
+                              try {
+                                setActionError(null);
+                                await onUndoSingleLog(log.id!);
+                              } catch (err) {
+                                setActionError(err instanceof Error ? err.message : '撤销失败');
+                              }
+                            }}
                             className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] whitespace-nowrap shrink-0 cursor-pointer"
                           >
                             <Undo2 className="w-3 h-3" />
@@ -669,6 +738,39 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                 })
               )}
             </div>
+
+            {totalLogPages > 1 && (
+              <div className="h-9 px-4 sm:px-5 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between text-xs font-mono-tabular text-[var(--text-secondary)] shrink-0">
+                <span>
+                  显示 {safeLogPage * LOGS_PAGE_SIZE + 1}–
+                  {Math.min((safeLogPage + 1) * LOGS_PAGE_SIZE, filteredLogs.length)} / 共{' '}
+                  {filteredLogs.length.toLocaleString()} 条
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safeLogPage === 0}
+                    onClick={() => setLogPage((p) => Math.max(0, p - 1))}
+                    className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 inline-flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    上一页
+                  </button>
+                  <span>
+                    {safeLogPage + 1} / {totalLogPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeLogPage >= totalLogPages - 1}
+                    onClick={() => setLogPage((p) => Math.min(totalLogPages - 1, p + 1))}
+                    className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 inline-flex items-center gap-0.5 cursor-pointer"
+                  >
+                    下一页
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

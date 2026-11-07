@@ -6,11 +6,14 @@ import {
   CetOfficialEntry,
   DataDiagnosticsReport,
   FilterCriteria,
-  LearningStatus,
   LexiconWordItem,
   UserWordRecord,
 } from '../data/types.ts';
-import { DEFAULT_FILTER_CRITERIA } from '../data/searchAndFilter.ts';
+import {
+  CLOSED_CLASS_STOPWORDS,
+  computeLexiconAnalytics,
+  DEFAULT_FILTER_CRITERIA,
+} from '../data/searchAndFilter.ts';
 
 interface AnalyticsViewProps {
   words: LexiconWordItem[];
@@ -22,13 +25,6 @@ interface AnalyticsViewProps {
   onJumpToExploreWithFilter: (criteria: FilterCriteria) => void;
   onInspectFamily: (familyId: string) => void;
 }
-
-const CLOSED_CLASS_STOPWORDS = new Set([
-  'the', 'be', 'of', 'and', 'to', 'a', 'in', 'that', 'it', 'for', 'i', 'on', 'you', 'with',
-  'as', 'he', 'at', 'by', 'this', 'have', 'from', 'or', 'one', 'not', 'but', 'what', 'all',
-  'we', 'when', 'can', 'there', 'she', 'which', 'their', 'they', 'will', 'would', 'who',
-  'do', 'no', 'yes', 'so', 'if', 'up', 'out', 'about', 'into', 'than', 'then', 'now',
-]);
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   words,
@@ -43,111 +39,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const [mobilePane, setMobilePane] = useState<'summary' | 'bands'>('summary');
 
   const stats = useMemo(() => {
-    const statusCounts: Record<LearningStatus, number> = {
-      unrated: 0,
-      queued: 0,
-      learning: 0,
-      mastered: 0,
-      deferred: 0,
-    };
-
-    let cet4FormsTotal = 0;
-    let cet4FormsMastered = 0;
-    let cet4FormsLearningOrQueued = 0;
-
-    let cet6OnlyFormsTotal = 0;
-    let cet6OnlyFormsMastered = 0;
-    let cet6OnlyFormsLearningOrQueued = 0;
-
-    let totalCorpusFreq = 0;
-    let masteredCorpusFreq = 0;
+    const core = computeLexiconAnalytics(words, families, cetEntries, userRecordsMap);
 
     const tagCounts = new Map<string, number>();
-
     for (const w of words) {
       const rec = userRecordsMap.get(w.id);
-      const st: LearningStatus = rec?.status || 'unrated';
-      statusCounts[st]++;
-
       if (rec?.tags) {
         for (const t of rec.tags) {
           tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
         }
       }
-
-      if (w.formFrequency && w.formFrequency > 0) {
-        totalCorpusFreq += w.formFrequency;
-        if (st === 'mastered') masteredCorpusFreq += w.formFrequency;
-      }
-
-      if (w.isCet4) {
-        cet4FormsTotal++;
-        if (st === 'mastered') cet4FormsMastered++;
-        else if (st === 'learning' || st === 'queued') cet4FormsLearningOrQueued++;
-      } else if (w.isCet6Only) {
-        cet6OnlyFormsTotal++;
-        if (st === 'mastered') cet6OnlyFormsMastered++;
-        else if (st === 'learning' || st === 'queued') cet6OnlyFormsLearningOrQueued++;
-      }
     }
-
-    let cet4OfficialTotal = 0;
-    let cet4OfficialCovered = 0;
-    let cet6OfficialTotal = 0;
-    let cet6OfficialCovered = 0;
-
-    for (const entry of cetEntries) {
-      const anyMastered = entry.members.some((m) =>
-        m.expandedForms.some(
-          (f) => userRecordsMap.get(f.toLowerCase())?.status === 'mastered'
-        )
-      );
-      if (entry.level === 'CET4') {
-        cet4OfficialTotal++;
-        if (anyMastered) cet4OfficialCovered++;
-      } else {
-        cet6OfficialTotal++;
-        if (anyMastered) cet6OfficialCovered++;
-      }
-    }
-
-    const bandRows = Array.from({ length: 25 }, (_, idx) => {
-      const bandNum = idx + 1;
-      const bandFams = families.filter((f) => f.bandNumber === bandNum);
-      let wordCount = 0;
-      let masteredWords = 0;
-      let learningOrQueuedWords = 0;
-      let coveredFamilies = 0;
-      let cetWordsInBand = 0;
-
-      for (const fam of bandFams) {
-        let famHasMastered = false;
-        cetWordsInBand += fam.cetMemberCount;
-        for (const m of fam.members) {
-          wordCount++;
-          const st = userRecordsMap.get(m.normalized)?.status || 'unrated';
-          if (st === 'mastered') {
-            masteredWords++;
-            famHasMastered = true;
-          } else if (st === 'learning' || st === 'queued') {
-            learningOrQueuedWords++;
-          }
-        }
-        if (famHasMastered) coveredFamilies++;
-      }
-
-      return {
-        bandNum,
-        bandLabel: `${bandNum}k`,
-        familyCount: bandFams.length,
-        coveredFamilies,
-        wordCount,
-        masteredWords,
-        learningOrQueuedWords,
-        cetWordsInBand,
-        pctMastered: wordCount > 0 ? Math.round((masteredWords / wordCount) * 100) : 0,
-      };
-    });
 
     const topUnmasteredFamilies = families
       .filter(
@@ -177,20 +79,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       .slice(0, 12);
 
     return {
-      statusCounts,
-      cet4FormsTotal,
-      cet4FormsMastered,
-      cet4FormsLearningOrQueued,
-      cet6OnlyFormsTotal,
-      cet6OnlyFormsMastered,
-      cet6OnlyFormsLearningOrQueued,
-      cet4OfficialTotal,
-      cet4OfficialCovered,
-      cet6OfficialTotal,
-      cet6OfficialCovered,
-      corpusWeightedPct:
-        totalCorpusFreq > 0 ? ((masteredCorpusFreq / totalCorpusFreq) * 100).toFixed(1) : '0.0',
-      bandRows,
+      ...core,
       topUnmasteredFamilies,
       topTags,
     };
@@ -263,7 +152,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       >
         {/* 1. 2x2 Core KPI Matrix */}
         <div className="grid grid-cols-2 divide-x divide-y divide-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0">
-          <div className="p-3.5">
+          <div className="p-3 sm:p-3.5">
             <div className="flex items-center justify-between gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
               <span className="truncate">CET-4 掌握率</span>
               <button
@@ -292,16 +181,22 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   {stats.cet4FormsMastered}/{stats.cet4FormsTotal}
                 </span>
               </div>
-              <div className="flex justify-between gap-1">
-                <span>官方词目</span>
+              <div className="flex justify-between gap-1" title="词目中至少 1 个词形已掌握">
+                <span>词目覆盖(≥1)</span>
                 <span className="text-[var(--text-secondary)]">
-                  {stats.cet4OfficialCovered}/{stats.cet4OfficialTotal}
+                  {stats.cet4OfficialPartialCovered}/{stats.cet4OfficialTotal}
+                </span>
+              </div>
+              <div className="flex justify-between gap-1" title="词目下全部词形槽位均已掌握">
+                <span>词目完整掌握</span>
+                <span className="text-[var(--text-secondary)]">
+                  {stats.cet4OfficialFullMastered}/{stats.cet4OfficialTotal}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="p-3.5">
+          <div className="p-3 sm:p-3.5">
             <div className="flex items-center justify-between gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
               <span className="truncate">CET-6 掌握率</span>
               <button
@@ -324,34 +219,40 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 : '0%'}
             </div>
             <div className="mt-1.5 space-y-0.5 text-[11px] font-mono-tabular text-[var(--text-muted)]">
-              <div className="flex justify-between gap-1">
-                <span>大纲词形</span>
+              <div className="flex justify-between gap-1" title="仅六级新增词形 (不含四六级同形词)">
+                <span>六级新增词形</span>
                 <span className="text-[var(--text-secondary)]">
                   {stats.cet6OnlyFormsMastered}/{stats.cet6OnlyFormsTotal}
                 </span>
               </div>
-              <div className="flex justify-between gap-1">
-                <span>官方词目</span>
+              <div className="flex justify-between gap-1" title="词目中至少 1 个词形已掌握">
+                <span>词目覆盖(≥1)</span>
                 <span className="text-[var(--text-secondary)]">
-                  {stats.cet6OfficialCovered}/{stats.cet6OfficialTotal}
+                  {stats.cet6OfficialPartialCovered}/{stats.cet6OfficialTotal}
+                </span>
+              </div>
+              <div className="flex justify-between gap-1" title="词目下全部词形槽位均已掌握">
+                <span>词目完整掌握</span>
+                <span className="text-[var(--text-secondary)]">
+                  {stats.cet6OfficialFullMastered}/{stats.cet6OfficialTotal}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="p-3.5">
+          <div className="p-3 sm:p-3.5">
             <div className="text-[11px] font-medium text-[var(--text-secondary)] truncate">
               语料库词频加权覆盖
             </div>
             <div className="mt-1 text-2xl font-mono-tabular font-bold text-emerald-600 dark:text-emerald-400">
               {stats.corpusWeightedPct}%
             </div>
-            <div className="mt-1 text-[10px] text-[var(--text-muted)] truncate">
-              按 BNC/COCA 真实词频加权
+            <div className="mt-1 text-[10px] text-[var(--text-muted)] leading-snug">
+              仅计 BNC/COCA 独立实测词频 (不含变体借用)
             </div>
           </div>
 
-          <div className="p-3.5">
+          <div className="p-3 sm:p-3.5">
             <div className="text-[11px] font-medium text-[var(--text-secondary)] truncate">
               个人学习状态分布
             </div>
@@ -482,7 +383,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           mobilePane === 'bands' ? 'flex' : 'hidden lg:flex'
         }`}
       >
-        <div className="px-4 sm:px-5 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="px-3.5 sm:px-5 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div className="flex items-baseline gap-3">
             <h2 className="text-xs sm:text-sm font-bold text-[var(--text-primary)] whitespace-nowrap">
               BNC/COCA 1k–25k 频段覆盖矩阵
@@ -515,7 +416,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* Band Table Header */}
-        <div className="grid grid-cols-[56px_72px_86px_1fr_46px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+        <div className="grid grid-cols-[52px_66px_78px_1fr_42px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
           <div>频段</div>
           <div>词族覆盖</div>
           <div>词形掌握</div>
@@ -539,7 +440,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     bands: [row.bandNum],
                   })
                 }
-                className="grid grid-cols-[56px_72px_86px_1fr_46px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-4 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                className="grid grid-cols-[52px_66px_78px_1fr_42px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
               >
                 <div className="font-mono-tabular font-bold text-[var(--text-primary)] whitespace-nowrap">
                   BNC {row.bandLabel}
@@ -557,7 +458,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   {row.cetWordsInBand > 0 ? `${row.cetWordsInBand} 词` : '—'}
                 </div>
 
-                <div className="pr-3 flex items-center gap-2">
+                <div className="pr-2 sm:pr-3 flex items-center gap-2">
                   <div className="flex-1 h-2 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
                     <div
                       className="h-full bg-emerald-500 transition-all"

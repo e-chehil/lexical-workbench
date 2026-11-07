@@ -9,7 +9,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '未评',
     description: '尚未人工处理（默认状态）',
     badgeClass:
-      'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/80 dark:text-slate-400 dark:border-slate-700',
+      'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700',
     dotClass: 'bg-slate-400 dark:bg-slate-500',
   },
   queued: {
@@ -102,6 +102,17 @@ export interface BncCocaFamily {
   cet6MemberCount: number;
 }
 
+export interface BncFamilyMembership {
+  familyId: string;
+  headword: string;
+  band: string;
+  bandNumber: number;
+  frequency: number;
+  familyFrequency: number;
+  isHeadword: boolean;
+  isZeroFrequency: boolean;
+}
+
 export type CrossSourceMatchType =
   | 'exact'
   | 'case_insensitive'
@@ -133,16 +144,19 @@ export interface LexiconWordItem {
   displayVariants: string[]; // e.g., ['color', 'colour'] or ['May', 'may']
 
   // BNC/COCA attributes
-  inBnc: boolean;
+  inBnc: boolean; // true ONLY when this exact spelling (case-insensitive) exists in BNC/COCA
+  hasExactBncForm?: boolean; // alias for clarity: true when independently recorded in BNC/COCA
+  bncLinkedViaVariant?: boolean; // true when not in BNC/COCA directly, but linked to a BNC family via CET sibling variant
   familyId: string | null;
   headword: string | null;
   band: string | null;
   bandNumber: number | null;
-  formFrequency: number | null; // null when not in BNC/COCA; 0 only when explicitly (0) in BNC/COCA
+  formFrequency: number | null; // null when not independently in BNC/COCA; 0 only when explicitly (0) in BNC/COCA
   familyFrequency: number | null;
   isHeadword: boolean;
   familyMemberCount: number | null;
   familyCetMemberCount: number;
+  bncMemberships?: BncFamilyMembership[]; // supports words appearing in multiple BNC families (e.g., grannies)
   matchType: CrossSourceMatchType;
   matchConfidence: 'high' | 'medium' | 'ambiguous' | 'none';
   matchNote: string | null;
@@ -171,7 +185,8 @@ export interface DataDiagnosticItem {
     | 'case_sensitivity'
     | 'sum_mismatch'
     | 'zero_frequency'
-    | 'unmatched_cet';
+    | 'unmatched_cet'
+    | 'multi_family_member';
   rawText: string;
   lineNumber?: number;
   parsedResult: string[];
@@ -191,10 +206,12 @@ export interface DataDiagnosticsReport {
   cetPhraseCount: number;
   cetAmbiguousCount: number;
   cetUnmatchedInBncCount: number;
+  cetVariantLinkedCount?: number;
 
   bncTotalLines: number;
   bncFamilyCount: number;
   bncTotalWordForms: number;
+  bncDistinctWordForms?: number;
   bncZeroFreqFormCount: number;
   bncSumMismatchCount: number;
   bncBandsCount: number;
@@ -224,6 +241,8 @@ export interface UserWordRecord {
   notes: string;
   firstRecordedAt: string; // ISO date
   updatedAt: string; // ISO date
+  studyCount?: number;
+  lastStudiedAt?: string;
   sourceNote?: string;
 }
 
@@ -233,7 +252,13 @@ export interface ActivityLogEntry {
   timestamp: string; // ISO timestamp
   wordId: string;
   word: string;
-  actionType: 'status_change' | 'tags_change' | 'note_change' | 'batch_import' | 'manual_Rollback';
+  actionType:
+    | 'status_change'
+    | 'tags_change'
+    | 'note_change'
+    | 'batch_import'
+    | 'study_touch'
+    | 'manual_Rollback';
   previousStatus?: LearningStatus;
   newStatus?: LearningStatus;
   previousTags?: string[];
@@ -249,6 +274,7 @@ export interface FilterCriteria {
     | 'all'
     | 'cet_all'
     | 'cet4'
+    | 'cet6'
     | 'cet6_new'
     | 'bnc_all'
     | 'both_cet_bnc'
@@ -280,6 +306,7 @@ export interface FilterCriteria {
 }
 
 export type SortField =
+  | 'priority_weight_desc'
   | 'word_asc'
   | 'word_desc'
   | 'form_freq_desc'
@@ -289,8 +316,7 @@ export type SortField =
   | 'band_asc'
   | 'band_desc'
   | 'updated_desc'
-  | 'first_recorded_desc'
-  | 'priority_weight_desc';
+  | 'first_recorded_desc';
 
 export interface WordCollection {
   id: string;

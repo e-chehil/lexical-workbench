@@ -1,5 +1,4 @@
 import Dexie, { type Table } from 'dexie';
-import { DEFAULT_FILTER_CRITERIA } from '../data/searchAndFilter.ts';
 import {
   ActivityLogEntry,
   DictionaryTemplate,
@@ -7,34 +6,26 @@ import {
   UserWordRecord,
   WordCollection,
 } from '../data/types.ts';
+import { DEFAULT_FILTER_CRITERIA } from '../data/searchAndFilter.ts';
 
-export interface CustomDatasetOverride {
+export interface CustomDatasetRecord {
   id: 'cet2016' | 'bnc_coca';
   fileName: string;
   content: string;
   updatedAt: string;
 }
 
-export interface BackupPayloadV1 {
-  app: 'Lexical Workbench';
-  schemaVersion: 1;
-  exportedAt: string;
-  userWords: UserWordRecord[];
-  activityLogs: ActivityLogEntry[];
-  collections: WordCollection[];
-  dictionaries?: DictionaryTemplate[];
-}
-
 export class LexicalWorkbenchDB extends Dexie {
   userWords!: Table<UserWordRecord, string>;
   activityLogs!: Table<ActivityLogEntry, number>;
   collections!: Table<WordCollection, string>;
-  customDatasets!: Table<CustomDatasetOverride, string>;
+  customDatasets!: Table<CustomDatasetRecord, string>;
 
   constructor() {
     super('LexicalWorkbenchDB_v1');
+
     this.version(1).stores({
-      userWords: 'wordId, status, updatedAt, firstRecordedAt, *tags',
+      userWords: 'wordId, status, updatedAt, *tags',
       activityLogs: '++id, batchId, timestamp, wordId, actionType',
       collections: 'id, type, updatedAt',
       customDatasets: 'id, updatedAt',
@@ -44,93 +35,84 @@ export class LexicalWorkbenchDB extends Dexie {
 
 export const db = new LexicalWorkbenchDB();
 
+const DEFAULT_BUILTIN_COLLECTIONS: WordCollection[] = [
+  {
+    id: 'builtin-cet4-core',
+    name: 'CET-4 核心高频词 (1k–3k)',
+    description: '四级大纲与 BNC 1k–3k 交集词汇，英语阅读与写作基石',
+    type: 'dynamic',
+    wordIds: [],
+    filterCriteria: {
+      ...DEFAULT_FILTER_CRITERIA,
+      sourceFilter: 'cet4',
+      minBand: 1,
+      maxBand: 3,
+    },
+    sortField: 'priority_weight_desc',
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'builtin-cet6-academic',
+    name: 'CET-6 进阶核心词 (2k–6k)',
+    description: '六级新增高频实词，适合四级通过后集中突破',
+    type: 'dynamic',
+    wordIds: [],
+    filterCriteria: {
+      ...DEFAULT_FILTER_CRITERIA,
+      sourceFilter: 'cet6_new',
+      minBand: 2,
+      maxBand: 6,
+    },
+    sortField: 'priority_weight_desc',
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'builtin-my-Difficult',
+    name: '我的重点难词本',
+    description: '手动归入的易错词、熟词僻义或真题高频词条',
+    type: 'static',
+    wordIds: ['appropriate', 'accountancy', 'owing to', 'compromise', 'consecutive'],
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+];
+
 export async function ensureDefaultCollections(): Promise<void> {
   const count = await db.collections.count();
-  if (count > 0) return;
-
-  const now = new Date().toISOString();
-  const initialCollections: WordCollection[] = [
-    {
-      id: 'col_cet4_high_freq',
-      name: 'CET-4 高频核心词 (1k–3k)',
-      description: '同时属于四级大纲且处于 BNC/COCA 前 3000 词族的高价值词汇',
-      type: 'dynamic',
-      wordIds: [],
-      filterCriteria: {
-        ...DEFAULT_FILTER_CRITERIA,
-        sourceFilter: 'cet4',
-        minBand: 1,
-        maxBand: 3,
-      },
-      sortField: 'family_freq_desc',
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'col_cet6_only',
-      name: 'CET-6 大纲进阶核心词',
-      description: '大纲中的六级专属词汇，按语料库词族总频次降序排列',
-      type: 'dynamic',
-      wordIds: [],
-      filterCriteria: {
-        ...DEFAULT_FILTER_CRITERIA,
-        sourceFilter: 'cet6_new',
-      },
-      sortField: 'family_freq_desc',
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'col_cet_phrases',
-      name: '大纲多词短语与固定搭配',
-      description: 'CET2016 大纲原表收录的带空格短语词条（如 owing to, baby boom 等）',
-      type: 'dynamic',
-      wordIds: [],
-      filterCriteria: {
-        ...DEFAULT_FILTER_CRITERIA,
-        sourceFilter: 'cet_all',
-        phrasesOnly: true,
-      },
-      sortField: 'word_asc',
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'col_high_family_derivatives',
-      name: '高频词族低频派生词',
-      description: '词族总频次 >= 5,000 但单一词形频次较低的派生词，适合通过熟词顺带攻克',
-      type: 'dynamic',
-      wordIds: [],
-      filterCriteria: {
-        ...DEFAULT_FILTER_CRITERIA,
-        sourceFilter: 'cet_all',
-        familyFilter: 'high_family_low_form',
-      },
-      sortField: 'family_freq_desc',
-      createdAt: now,
-      updatedAt: now,
-    },
-  ];
-
-  await db.collections.bulkPut(initialCollections);
+  if (count === 0) {
+    await db.collections.bulkPut(DEFAULT_BUILTIN_COLLECTIONS);
+  }
 }
 
+/**
+ * Updates a single word's learning status and writes an activity log entry.
+ */
 export async function updateWordStatus(
   wordId: string,
   wordDisplay: string,
   newStatus: LearningStatus,
-  sourceLabel = '手动设置'
+  sourceLabel = '工作台快捷标注'
 ): Promise<UserWordRecord> {
   const now = new Date().toISOString();
   return db.transaction('rw', db.userWords, db.activityLogs, async () => {
     const existing = await db.userWords.get(wordId);
     const previousStatus: LearningStatus = existing?.status || 'unrated';
 
+    const nextStudyCount =
+      newStatus !== previousStatus && (newStatus === 'learning' || newStatus === 'mastered')
+        ? (existing?.studyCount || 0) + 1
+        : existing?.studyCount || 0;
+
     const record: UserWordRecord = existing
       ? {
           ...existing,
           status: newStatus,
           updatedAt: now,
+          studyCount: nextStudyCount,
+          lastStudiedAt:
+            newStatus === 'learning' || newStatus === 'mastered' ? now : existing.lastStudiedAt,
         }
       : {
           wordId,
@@ -140,7 +122,8 @@ export async function updateWordStatus(
           notes: '',
           firstRecordedAt: now,
           updatedAt: now,
-          sourceNote: sourceLabel,
+          studyCount: newStatus === 'learning' || newStatus === 'mastered' ? 1 : 0,
+          lastStudiedAt: newStatus === 'learning' || newStatus === 'mastered' ? now : undefined,
         };
 
     await db.userWords.put(record);
@@ -153,6 +136,10 @@ export async function updateWordStatus(
         actionType: 'status_change',
         previousStatus,
         newStatus,
+        previousTags: existing?.tags || [],
+        newTags: record.tags,
+        previousNotes: existing?.notes || '',
+        newNotes: record.notes,
         sourceLabel,
       });
     }
@@ -161,24 +148,82 @@ export async function updateWordStatus(
   });
 }
 
-export async function updateWordTagsAndNotes(
+/**
+ * Explicitly records a study review touch ("记录本次学习") without requiring a status transition.
+ * Increments studyCount, updates lastStudiedAt, and adds a 'study_touch' activity log entry.
+ */
+export async function recordWordStudyTouch(
   wordId: string,
   wordDisplay: string,
-  tags: string[],
-  notes: string
+  sourceLabel = '词条详情复习打卡'
 ): Promise<UserWordRecord> {
   const now = new Date().toISOString();
-  const cleanTags = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
-
   return db.transaction('rw', db.userWords, db.activityLogs, async () => {
     const existing = await db.userWords.get(wordId);
-    const previousTags = existing?.tags || [];
-    const previousNotes = existing?.notes || '';
+    const prevStatus: LearningStatus = existing?.status || 'unrated';
+    const nextStatus: LearningStatus = prevStatus === 'unrated' ? 'learning' : prevStatus;
+    const nextStudyCount = (existing?.studyCount || 0) + 1;
 
     const record: UserWordRecord = existing
       ? {
           ...existing,
-          tags: cleanTags,
+          status: nextStatus,
+          updatedAt: now,
+          studyCount: nextStudyCount,
+          lastStudiedAt: now,
+        }
+      : {
+          wordId,
+          word: wordDisplay,
+          status: nextStatus,
+          tags: [],
+          notes: '',
+          firstRecordedAt: now,
+          updatedAt: now,
+          studyCount: 1,
+          lastStudiedAt: now,
+        };
+
+    await db.userWords.put(record);
+
+    await db.activityLogs.add({
+      timestamp: now,
+      wordId,
+      word: wordDisplay,
+      actionType: 'study_touch',
+      previousStatus: prevStatus,
+      newStatus: nextStatus,
+      previousTags: existing?.tags || [],
+      newTags: record.tags,
+      previousNotes: existing?.notes || '',
+      newNotes: record.notes,
+      sourceLabel: `${sourceLabel} (累计 ${nextStudyCount} 次)`,
+    });
+
+    return record;
+  });
+}
+
+/**
+ * Updates personal tags and notes for a single word.
+ */
+export async function updateWordTagsAndNotes(
+  wordId: string,
+  wordDisplay: string,
+  tags: string[],
+  notes: string,
+  sourceLabel = '词条详情编辑'
+): Promise<UserWordRecord> {
+  const now = new Date().toISOString();
+  return db.transaction('rw', db.userWords, db.activityLogs, async () => {
+    const existing = await db.userWords.get(wordId);
+    const prevTags = existing?.tags || [];
+    const prevNotes = existing?.notes || '';
+
+    const record: UserWordRecord = existing
+      ? {
+          ...existing,
+          tags,
           notes,
           updatedAt: now,
         }
@@ -186,33 +231,31 @@ export async function updateWordTagsAndNotes(
           wordId,
           word: wordDisplay,
           status: 'unrated',
-          tags: cleanTags,
+          tags,
           notes,
           firstRecordedAt: now,
           updatedAt: now,
+          studyCount: 0,
         };
 
     await db.userWords.put(record);
 
-    if (JSON.stringify(previousTags) !== JSON.stringify(cleanTags)) {
-      await db.activityLogs.add({
-        timestamp: now,
-        wordId,
-        word: wordDisplay,
-        actionType: 'tags_change',
-        previousTags,
-        newTags: cleanTags,
-      });
-    }
+    const tagsChanged = JSON.stringify(prevTags) !== JSON.stringify(tags);
+    const notesChanged = prevNotes !== notes;
 
-    if (previousNotes !== notes) {
+    if (tagsChanged || notesChanged) {
       await db.activityLogs.add({
         timestamp: now,
         wordId,
         word: wordDisplay,
-        actionType: 'note_change',
-        previousNotes,
+        actionType: tagsChanged ? 'tags_change' : 'note_change',
+        previousStatus: record.status,
+        newStatus: record.status,
+        previousTags: prevTags,
+        newTags: tags,
+        previousNotes: prevNotes,
         newNotes: notes,
+        sourceLabel,
       });
     }
 
@@ -220,6 +263,11 @@ export async function updateWordTagsAndNotes(
   });
 }
 
+/**
+ * Batch applies updates (status, tags, notes) to multiple words and records a shared batchId.
+ * CRITICAL: When `item.status` and `options.defaultStatus` are both omitted (e.g. batch adding tags),
+ * `nextStatus` preserves `existing?.status ?? 'unrated'` and NEVER implicitly turns unrated words into `'queued'`.
+ */
 export async function batchApplyWordUpdates(
   items: {
     wordId: string;
@@ -231,233 +279,422 @@ export async function batchApplyWordUpdates(
   options: {
     defaultStatus?: LearningStatus;
     commonTags?: string[];
-    sourceLabel?: string;
+    sourceLabel: string;
     customTimestamp?: string;
   }
 ): Promise<{ batchId: string; updatedCount: number }> {
-  const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const timestamp = options.customTimestamp || new Date().toISOString();
-  const sourceLabel = options.sourceLabel || '批量录入';
+  if (items.length === 0) return { batchId: '', updatedCount: 0 };
 
-  let updatedCount = 0;
+  const timestamp = options.customTimestamp || new Date().toISOString();
+  const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
   await db.transaction('rw', db.userWords, db.activityLogs, async () => {
-    for (const item of items) {
-      const existing = await db.userWords.get(item.wordId);
+    const ids = items.map((i) => i.wordId);
+    const existingRecords = await db.userWords.bulkGet(ids);
+
+    const recordsToPut: UserWordRecord[] = [];
+    const logsToAdd: ActivityLogEntry[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const existing = existingRecords[i];
+
       const prevStatus: LearningStatus = existing?.status || 'unrated';
       const prevTags = existing?.tags || [];
       const prevNotes = existing?.notes || '';
 
+      // Preserve existing status or 'unrated' if no status was specified!
       const nextStatus: LearningStatus =
-        item.status ?? options.defaultStatus ?? existing?.status ?? 'queued';
-      const mergedTags = Array.from(
-        new Set([
-          ...prevTags,
-          ...(options.commonTags || []),
-          ...(item.tagsToAdd || []),
-        ])
+        item.status ?? options.defaultStatus ?? existing?.status ?? 'unrated';
+
+      const nextTags = Array.from(
+        new Set([...prevTags, ...(options.commonTags || []), ...(item.tagsToAdd || [])])
       );
-      const nextNotes = item.noteToAppend
-        ? prevNotes
-          ? `${prevNotes}\n${item.noteToAppend}`
-          : item.noteToAppend
-        : prevNotes;
 
-      const record: UserWordRecord = {
-        wordId: item.wordId,
-        word: item.word,
-        status: nextStatus,
-        tags: mergedTags,
-        notes: nextNotes,
-        firstRecordedAt: existing?.firstRecordedAt || timestamp,
-        updatedAt: timestamp,
-        sourceNote: sourceLabel,
-      };
+      let nextNotes = prevNotes;
+      if (item.noteToAppend && item.noteToAppend.trim()) {
+        const cleanNote = item.noteToAppend.trim();
+        nextNotes = prevNotes
+          ? prevNotes.includes(cleanNote)
+            ? prevNotes
+            : `${prevNotes}\n${cleanNote}`
+          : cleanNote;
+      }
 
-      await db.userWords.put(record);
-      await db.activityLogs.add({
+      const nextStudyCount =
+        nextStatus !== prevStatus && (nextStatus === 'learning' || nextStatus === 'mastered')
+          ? (existing?.studyCount || 0) + 1
+          : existing?.studyCount || 0;
+
+      const record: UserWordRecord = existing
+        ? {
+            ...existing,
+            status: nextStatus,
+            tags: nextTags,
+            notes: nextNotes,
+            updatedAt: timestamp,
+            studyCount: nextStudyCount,
+            lastStudiedAt:
+              nextStatus === 'learning' || nextStatus === 'mastered'
+                ? timestamp
+                : existing.lastStudiedAt,
+            sourceNote: options.sourceLabel,
+          }
+        : {
+            wordId: item.wordId,
+            word: item.word,
+            status: nextStatus,
+            tags: nextTags,
+            notes: nextNotes,
+            firstRecordedAt: timestamp,
+            updatedAt: timestamp,
+            studyCount: nextStatus === 'learning' || nextStatus === 'mastered' ? 1 : 0,
+            lastStudiedAt:
+              nextStatus === 'learning' || nextStatus === 'mastered' ? timestamp : undefined,
+            sourceNote: options.sourceLabel,
+          };
+
+      recordsToPut.push(record);
+      logsToAdd.push({
         batchId,
         timestamp,
         wordId: item.wordId,
         word: item.word,
-        actionType: 'batch_import',
+        actionType:
+          item.status === undefined && options.defaultStatus === undefined
+            ? 'tags_change'
+            : 'batch_import',
         previousStatus: prevStatus,
         newStatus: nextStatus,
         previousTags: prevTags,
-        newTags: mergedTags,
+        newTags: nextTags,
         previousNotes: prevNotes,
         newNotes: nextNotes,
-        sourceLabel,
+        sourceLabel: options.sourceLabel,
       });
-      updatedCount++;
     }
+
+    await db.userWords.bulkPut(recordsToPut);
+    await db.activityLogs.bulkAdd(logsToAdd);
   });
 
-  return { batchId, updatedCount };
+  return { batchId, updatedCount: items.length };
 }
 
+/**
+ * Safely rolls back a batch operation by batchId.
+ * Checks if any affected word has subsequent modifications after this batch.
+ * If newer modifications exist, refuses to overwrite newer edits and throws a clear error.
+ */
 export async function rollbackBatchById(batchId: string): Promise<number> {
+  if (!batchId) return 0;
+  const now = new Date().toISOString();
+
   return db.transaction('rw', db.userWords, db.activityLogs, async () => {
-    const logs = await db.activityLogs.where('batchId').equals(batchId).toArray();
-    if (logs.length === 0) return 0;
+    const batchLogs = await db.activityLogs.where('batchId').equals(batchId).toArray();
+    if (batchLogs.length === 0) return 0;
 
-    // Revert in reverse chronological order
-    const sortedLogs = [...logs].sort((a, b) => (b.id || 0) - (a.id || 0));
-    const now = new Date().toISOString();
+    const maxBatchLogId = Math.max(...batchLogs.map((l) => l.id ?? 0));
+    const affectedWordIds = Array.from(new Set(batchLogs.map((l) => l.wordId)));
 
-    for (const log of sortedLogs) {
-      const current = await db.userWords.get(log.wordId);
-      if (current) {
-        await db.userWords.put({
-          ...current,
-          status: log.previousStatus ?? 'unrated',
-          tags: log.previousTags ?? [],
-          notes: log.previousNotes ?? '',
-          updatedAt: now,
-        });
-      }
-      if (log.id !== undefined) {
-        await db.activityLogs.delete(log.id);
+    const conflictingWords: string[] = [];
+    for (const wordId of affectedWordIds) {
+      const wordLogs = await db.activityLogs.where('wordId').equals(wordId).toArray();
+      const hasNewerEdit = wordLogs.some(
+        (l) => l.batchId !== batchId && (l.id ?? 0) > maxBatchLogId
+      );
+      if (hasNewerEdit) {
+        const display = batchLogs.find((b) => b.wordId === wordId)?.word || wordId;
+        conflictingWords.push(display);
       }
     }
 
-    return logs.length;
-  });
-}
+    if (conflictingWords.length > 0) {
+      const sample = conflictingWords.slice(0, 4).join('、');
+      const suffix = conflictingWords.length > 4 ? ` 等 ${conflictingWords.length} 个词条` : '';
+      throw new Error(
+        `无法回滚该批次：词条「${sample}${suffix}」在此批次之后已有新的个人记录修改。为保护最新学习记录不被覆盖，已阻止整批回滚。`
+      );
+    }
 
-export async function undoSingleActivityLog(logId: number): Promise<boolean> {
-  return db.transaction('rw', db.userWords, db.activityLogs, async () => {
-    const log = await db.activityLogs.get(logId);
-    if (!log) return false;
+    const existingRecords = await db.userWords.bulkGet(batchLogs.map((l) => l.wordId));
+    const toRestore: UserWordRecord[] = [];
 
-    const current = await db.userWords.get(log.wordId);
-    const now = new Date().toISOString();
-    if (current) {
-      await db.userWords.put({
+    for (let i = 0; i < batchLogs.length; i++) {
+      const log = batchLogs[i];
+      const current = existingRecords[i];
+      if (!current) continue;
+
+      toRestore.push({
         ...current,
-        status: log.previousStatus ?? current.status,
-        tags: log.previousTags ?? current.tags,
-        notes: log.previousNotes ?? current.notes,
+        status: log.previousStatus || 'unrated',
+        tags: log.previousTags || [],
+        notes: log.previousNotes || '',
         updatedAt: now,
       });
     }
-    await db.activityLogs.delete(logId);
-    return true;
+
+    await db.userWords.bulkPut(toRestore);
+    await db.activityLogs.bulkDelete(
+      batchLogs.map((l) => l.id!).filter((id) => id !== undefined)
+    );
+    return toRestore.length;
   });
+}
+
+/**
+ * Safely undoes a single activity log entry.
+ * Refuses to undo if a newer activity log exists for the same wordId,
+ * and restores ONLY the fields modified by that specific actionType.
+ */
+export async function undoSingleActivityLog(logId: number): Promise<void> {
+  const now = new Date().toISOString();
+  await db.transaction('rw', db.userWords, db.activityLogs, async () => {
+    const log = await db.activityLogs.get(logId);
+    if (!log) return;
+
+    const wordLogs = await db.activityLogs.where('wordId').equals(log.wordId).toArray();
+    const newerLogs = wordLogs.filter((l) => (l.id ?? 0) > (log.id ?? 0));
+    if (newerLogs.length > 0) {
+      throw new Error(
+        `无法撤销此条旧记录：词条「${log.word}」在该操作之后还有 ${newerLogs.length} 条更新的修改记录。请先按时间倒序撤销最新操作，或直接在词条详情中修改。`
+      );
+    }
+
+    const current = await db.userWords.get(log.wordId);
+    if (current) {
+      const restored: UserWordRecord = {
+        ...current,
+        updatedAt: now,
+      };
+
+      if (log.actionType === 'status_change') {
+        restored.status = log.previousStatus || 'unrated';
+      } else if (log.actionType === 'tags_change') {
+        restored.tags = log.previousTags || [];
+      } else if (log.actionType === 'note_change') {
+        restored.notes = log.previousNotes || '';
+      } else if (log.actionType === 'study_touch') {
+        restored.status = log.previousStatus || current.status;
+        restored.studyCount = Math.max(0, (current.studyCount || 1) - 1);
+      } else {
+        restored.status = log.previousStatus || 'unrated';
+        restored.tags = log.previousTags || [];
+        restored.notes = log.previousNotes || '';
+      }
+
+      await db.userWords.put(restored);
+    }
+
+    await db.activityLogs.delete(logId);
+  });
+}
+
+export interface FullBackupPayload {
+  version: string;
+  exportedAt: string;
+  userWords: UserWordRecord[];
+  collections: WordCollection[];
+  activityLogs: ActivityLogEntry[];
+  dictionaries?: DictionaryTemplate[];
+  customDatasets?: CustomDatasetRecord[];
 }
 
 export async function exportFullBackupJson(
   dictionaries: DictionaryTemplate[]
 ): Promise<string> {
-  const [userWords, activityLogs, collections] = await Promise.all([
+  const [userWords, collections, activityLogs, customDatasets] = await Promise.all([
     db.userWords.toArray(),
-    db.activityLogs.toArray(),
     db.collections.toArray(),
+    db.activityLogs.toArray(),
+    db.customDatasets.toArray(),
   ]);
 
-  const payload: BackupPayloadV1 = {
-    app: 'Lexical Workbench',
-    schemaVersion: 1,
+  const payload: FullBackupPayload = {
+    version: '1.1.0',
     exportedAt: new Date().toISOString(),
     userWords,
-    activityLogs,
     collections,
+    activityLogs,
     dictionaries,
+    customDatasets,
   };
 
   return JSON.stringify(payload, null, 2);
 }
 
+/**
+ * Validates and imports a backup JSON string.
+ * Supports:
+ * - 'merge' (保守合并): compares updatedAt timestamps so newer status wins, unions tags/notes/collections,
+ *   imports non-duplicate activityLogs, and imports customDatasets.
+ * - 'overwrite' (完全覆盖): validates structure first, then atomically replaces all tables.
+ */
 export async function importBackupJson(
   jsonText: string,
-  mode: 'overwrite' | 'merge'
+  mode: 'merge' | 'overwrite'
 ): Promise<{
   importedWords: number;
   importedLogs: number;
   importedCollections: number;
+  importedDatasets: number;
   dictionaries?: DictionaryTemplate[];
 }> {
-  let parsed: BackupPayloadV1;
+  let parsed: Partial<FullBackupPayload>;
   try {
     parsed = JSON.parse(jsonText);
   } catch {
-    throw new Error('JSON 文件格式无效，无法解析。');
+    throw new Error('备份文件不是合法的 JSON 格式');
   }
 
-  if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    parsed.app !== 'Lexical Workbench' ||
-    !Array.isArray(parsed.userWords)
-  ) {
-    throw new Error('备份文件缺少必要的 Lexical Workbench 结构字段 (userWords)。');
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.userWords)) {
+    throw new Error('备份文件缺少有效的 userWords 数组字段，已拒绝导入以保护现有数据');
+  }
+  if (parsed.collections !== undefined && !Array.isArray(parsed.collections)) {
+    throw new Error('备份文件 collections 字段格式无效');
+  }
+  if (parsed.activityLogs !== undefined && !Array.isArray(parsed.activityLogs)) {
+    throw new Error('备份文件 activityLogs 字段格式无效');
+  }
+  if (parsed.customDatasets !== undefined && !Array.isArray(parsed.customDatasets)) {
+    throw new Error('备份文件 customDatasets 字段格式无效');
   }
 
-  return db.transaction('rw', db.userWords, db.activityLogs, db.collections, async () => {
-    if (mode === 'overwrite') {
-      await Promise.all([
-        db.userWords.clear(),
-        db.activityLogs.clear(),
-        db.collections.clear(),
-      ]);
-      await db.userWords.bulkPut(parsed.userWords);
-      if (Array.isArray(parsed.activityLogs)) {
-        const cleanLogs = parsed.activityLogs.map(({ id: _id, ...rest }) => rest);
-        await db.activityLogs.bulkAdd(cleanLogs);
+  const incomingWords = parsed.userWords;
+  const incomingCols = parsed.collections || [];
+  const incomingLogs = parsed.activityLogs || [];
+  const incomingDatasets = parsed.customDatasets || [];
+
+  return db.transaction(
+    'rw',
+    db.userWords,
+    db.collections,
+    db.activityLogs,
+    db.customDatasets,
+    async () => {
+      if (mode === 'overwrite') {
+        await Promise.all([
+          db.userWords.clear(),
+          db.collections.clear(),
+          db.activityLogs.clear(),
+          db.customDatasets.clear(),
+        ]);
+
+        if (incomingWords.length > 0) await db.userWords.bulkPut(incomingWords);
+        if (incomingCols.length > 0) await db.collections.bulkPut(incomingCols);
+        if (incomingLogs.length > 0) await db.activityLogs.bulkPut(incomingLogs);
+        if (incomingDatasets.length > 0) await db.customDatasets.bulkPut(incomingDatasets);
+
+        return {
+          importedWords: incomingWords.length,
+          importedCollections: incomingCols.length,
+          importedLogs: incomingLogs.length,
+          importedDatasets: incomingDatasets.length,
+          dictionaries: parsed.dictionaries,
+        };
       }
-      if (Array.isArray(parsed.collections)) {
-        await db.collections.bulkPut(parsed.collections);
-      }
-      return {
-        importedWords: parsed.userWords.length,
-        importedLogs: parsed.activityLogs?.length || 0,
-        importedCollections: parsed.collections?.length || 0,
-        dictionaries: parsed.dictionaries,
-      };
-    } else {
-      // Merge mode: preserve newer status, union tags, keep non-empty notes
-      let mergedWordsCount = 0;
-      for (const incoming of parsed.userWords) {
-        const existing = await db.userWords.get(incoming.wordId);
+
+      // Conservative Merge (保守合并)
+      let importedWords = 0;
+      for (const item of incomingWords) {
+        if (!item || !item.wordId) continue;
+        const existing = await db.userWords.get(item.wordId);
         if (!existing) {
-          await db.userWords.put(incoming);
-          mergedWordsCount++;
+          await db.userWords.put(item);
+          importedWords++;
         } else {
-          const isIncomingNewer = incoming.updatedAt >= existing.updatedAt;
-          const mergedTags = Array.from(new Set([...existing.tags, ...(incoming.tags || [])]));
+          const incomingNewer = (item.updatedAt || '') >= (existing.updatedAt || '');
+          const mergedTags = Array.from(new Set([...(existing.tags || []), ...(item.tags || [])]));
           const mergedNotes = existing.notes
-            ? incoming.notes && !existing.notes.includes(incoming.notes)
-              ? `${existing.notes}\n${incoming.notes}`
+            ? item.notes && !existing.notes.includes(item.notes)
+              ? `${existing.notes}\n${item.notes}`
               : existing.notes
-            : incoming.notes || '';
+            : item.notes || '';
+
+          const nextStatus: LearningStatus = incomingNewer
+            ? item.status !== 'unrated'
+              ? item.status
+              : existing.status
+            : existing.status !== 'unrated'
+              ? existing.status
+              : item.status;
 
           await db.userWords.put({
-            wordId: existing.wordId,
-            word: existing.word,
-            status: isIncomingNewer ? incoming.status : existing.status,
+            ...existing,
+            status: nextStatus,
             tags: mergedTags,
             notes: mergedNotes,
             firstRecordedAt:
-              incoming.firstRecordedAt < existing.firstRecordedAt
-                ? incoming.firstRecordedAt
-                : existing.firstRecordedAt,
-            updatedAt: isIncomingNewer ? incoming.updatedAt : existing.updatedAt,
-            sourceNote: incoming.sourceNote || existing.sourceNote,
+              existing.firstRecordedAt && item.firstRecordedAt
+                ? existing.firstRecordedAt < item.firstRecordedAt
+                  ? existing.firstRecordedAt
+                  : item.firstRecordedAt
+                : existing.firstRecordedAt || item.firstRecordedAt,
+            updatedAt: incomingNewer ? item.updatedAt : existing.updatedAt,
+            studyCount: Math.max(existing.studyCount || 0, item.studyCount || 0),
+            lastStudiedAt:
+              (item.lastStudiedAt || '') > (existing.lastStudiedAt || '')
+                ? item.lastStudiedAt
+                : existing.lastStudiedAt,
           });
-          mergedWordsCount++;
+          importedWords++;
         }
       }
 
-      if (Array.isArray(parsed.collections)) {
-        await db.collections.bulkPut(parsed.collections);
+      let importedCollections = 0;
+      for (const col of incomingCols) {
+        if (!col || !col.id) continue;
+        const existingCol = await db.collections.get(col.id);
+        if (!existingCol) {
+          await db.collections.put(col);
+        } else {
+          const incomingColNewer = (col.updatedAt || '') >= (existingCol.updatedAt || '');
+          const mergedWordIds = Array.from(
+            new Set([...(existingCol.wordIds || []), ...(col.wordIds || [])])
+          );
+          await db.collections.put({
+            ...(incomingColNewer ? col : existingCol),
+            wordIds: mergedWordIds,
+            updatedAt: incomingColNewer ? col.updatedAt : existingCol.updatedAt,
+          });
+        }
+        importedCollections++;
+      }
+
+      let importedLogs = 0;
+      if (incomingLogs.length > 0) {
+        const existingLogs = await db.activityLogs.toArray();
+        const existingSigs = new Set(
+          existingLogs.map((l) => `${l.timestamp}|${l.wordId}|${l.actionType}`)
+        );
+        const newLogs: ActivityLogEntry[] = [];
+        for (const log of incomingLogs) {
+          const sig = `${log.timestamp}|${log.wordId}|${log.actionType}`;
+          if (!existingSigs.has(sig)) {
+            existingSigs.add(sig);
+            const { id: _ignoreId, ...rest } = log;
+            newLogs.push(rest);
+          }
+        }
+        if (newLogs.length > 0) {
+          await db.activityLogs.bulkAdd(newLogs);
+          importedLogs = newLogs.length;
+        }
+      }
+
+      let importedDatasets = 0;
+      if (incomingDatasets.length > 0) {
+        await db.customDatasets.bulkPut(incomingDatasets);
+        importedDatasets = incomingDatasets.length;
       }
 
       return {
-        importedWords: mergedWordsCount,
-        importedLogs: 0,
-        importedCollections: parsed.collections?.length || 0,
+        importedWords,
+        importedCollections,
+        importedLogs,
+        importedDatasets,
         dictionaries: parsed.dictionaries,
       };
     }
-  });
+  );
 }

@@ -5,16 +5,18 @@ import path from 'node:path';
 import {
   buildLexiconDatabase,
   expandCetMemberToken,
-  extractHomograph,
   parseBncCoca,
   parseCet2016,
 } from './parser.ts';
 import {
   buildDictionaryUrl,
+  computeLexiconAnalytics,
   computeStudyPriorityScore,
   DEFAULT_FILTER_CRITERIA,
+  escapeCsvField,
   filterAndSortWords,
   parseBatchInputText,
+  parseCsvLine,
   searchLexicon,
 } from './searchAndFilter.ts';
 import { UserWordRecord } from './types.ts';
@@ -103,7 +105,9 @@ Celsius/-cius`;
   assert.equal(entries[7].members[1].expandedForms[0], 'baby boomer');
 
   // Check ambiguous diagnostic generated for Celsius/-cius
-  assert.ok(diagnostics.some((d) => d.category === 'ambiguous_spelling' && d.rawText === 'Celsius/-cius'));
+  assert.ok(
+    diagnostics.some((d) => d.category === 'ambiguous_spelling' && d.rawText === 'Celsius/-cius')
+  );
 });
 
 test('BNC/COCA parser handles quotes, zero-frequency forms, and sum mismatch diagnostics', () => {
@@ -140,51 +144,59 @@ test('BNC/COCA parser handles quotes, zero-frequency forms, and sum mismatch dia
   assert.ok(diagnostics.some((d) => d.category === 'sum_mismatch'));
 });
 
-test('Cross-source lexicon builder preserves CET level provenance and never conflates unranked words with 0 frequency', () => {
+test('Cross-source lexicon builder never fabricates variant formFrequency and preserves multi-family memberships', () => {
   const sampleCet = `able\tability
 appropriate¹
 ★appropriate²\tappropriation
-owe\towing to`;
+owe\towing to
+★sober/-re
+often/oftentimes`;
 
   const sampleBnc = `List \tHeadword \tRelated forms\tTotal frequency
 1k\table\t"able (29930), abilities (1334), ability (9113), unably (0)"\t47760
 1k\towe\t"owe (3000), owed (2000), owes (1000), owing (1500)"\t7500
-2k\tappropriate\t"appropriate (10000), appropriately (2000), appropriation (500)"\t12500`;
+2k\tappropriate\t"appropriate (10000), appropriately (2000), appropriation (500)"\t12500
+4k\tsober\t"sober (1362), sobered (120), sobering (200)"\t1682
+1k\toften\t"often (77996), oftener (12)"\t78008
+1k\tgrandfather\t"grandfather (3000), grannies (17)"\t3017
+6k\tgranny\t"granny (1000), grannies (45)"\t1045`;
 
   const bundle = buildLexiconDatabase(sampleCet, sampleBnc);
   const byId = new Map(bundle.words.map((w) => [w.id, w]));
 
-  // 1. "able" and "ability" are in CET4, while "abilities" is in the same BNC family ("able") but NOT marked as CET4!
-  const able = byId.get('able')!;
-  const ability = byId.get('ability')!;
-  const abilities = byId.get('abilities')!;
-  assert.equal(able.inCet, true);
-  assert.equal(able.isCet4, true);
-  assert.equal(ability.inCet, true);
-  assert.equal(abilities.inCet, false);
-  assert.equal(abilities.isCet4, false);
-  assert.equal(abilities.formFrequency, 1334);
-  assert.equal(abilities.familyFrequency, 47760);
+  // 1. "sober" is directly in BNC (freq 1362), while "sobre" is NOT in BNC -> formFrequency MUST be null (never 1362!)
+  const sober = byId.get('sober')!;
+  const sobre = byId.get('sobre')!;
+  assert.equal(sober.inBnc, true);
+  assert.equal(sober.hasExactBncForm, true);
+  assert.equal(sober.formFrequency, 1362);
 
-  // 2. "appropriate" has both CET4 (from appropriate¹) and CET6 (from ★appropriate²)
-  const approp = byId.get('appropriate')!;
-  assert.equal(approp.isCet4, true);
-  assert.equal(approp.isCet6, true);
-  assert.deepEqual(approp.homographNumbers, [1, 2]);
+  assert.equal(sobre.inCet, true);
+  assert.equal(sobre.inBnc, false);
+  assert.equal(sobre.hasExactBncForm, false);
+  assert.equal(sobre.bncLinkedViaVariant, true);
+  assert.equal(sobre.formFrequency, null);
+  assert.equal(sobre.headword, 'sober');
+  assert.equal(sobre.familyFrequency, 1682);
 
-  // 3. "owing to" is in CET4, not in BNC/COCA -> formFrequency MUST be null (never 0!), while "unably" is in BNC/COCA with explicit 0 frequency
-  const owingTo = byId.get('owing to')!;
-  assert.equal(owingTo.inCet, true);
-  assert.equal(owingTo.inBnc, false);
-  assert.equal(owingTo.formFrequency, null);
-  assert.equal(owingTo.relatedPhraseCoreWord, 'owe');
+  // 2. "oftentimes" is linked to "often" family via variant, with formFrequency = null
+  const oftentimes = byId.get('oftentimes')!;
+  assert.equal(oftentimes.inBnc, false);
+  assert.equal(oftentimes.bncLinkedViaVariant, true);
+  assert.equal(oftentimes.formFrequency, null);
+  assert.equal(oftentimes.headword, 'often');
 
-  const unably = byId.get('unably')!;
-  assert.equal(unably.inBnc, true);
-  assert.equal(unably.formFrequency, 0);
+  // 3. "grannies" appears in two BNC families: grandfather (1k, 17) and granny (6k, 45)
+  const grannies = byId.get('grannies')!;
+  assert.equal(grannies.inBnc, true);
+  assert.equal(grannies.bncMemberships?.length, 2);
+  assert.equal(grannies.bncMemberships?.[0].headword, 'grandfather');
+  assert.equal(grannies.bncMemberships?.[0].frequency, 17);
+  assert.equal(grannies.bncMemberships?.[1].headword, 'granny');
+  assert.equal(grannies.bncMemberships?.[1].frequency, 45);
 });
 
-test('Search, multi-dimensional filter, batch input parser, and dictionary URL builder work accurately', () => {
+test('RFC 4180 CSV parser, CSV escaping, and CET partial vs full official entry analytics work accurately', () => {
   const sampleCet = `able\tability
 advise\tadvisor/-er\tadvisory\tadvisable
 owe\towing to
@@ -197,15 +209,25 @@ owe\towing to
   const bundle = buildLexiconDatabase(sampleCet, sampleBnc);
   const wordsMap = new Map(bundle.words.map((w) => [w.id, w]));
 
-  // Search for inflected form "abilities"
-  const searchRes = searchLexicon(bundle.words, 'abilities');
-  assert.equal(searchRes[0].word.id, 'abilities');
-  assert.equal(searchRes[0].word.headword, 'able');
-  assert.equal(searchRes[0].word.formFrequency, 1334);
+  // RFC 4180 CSV line parsing
+  const csvFields = parseCsvLine(
+    '"ability","mastered","核心词,高频","note, with ""quotes"" and comma"'
+  );
+  assert.deepEqual(csvFields, [
+    'ability',
+    'mastered',
+    '核心词,高频',
+    'note, with "quotes" and comma',
+  ]);
 
-  // Batch input parser preserves "owing to" on a line and deduplicates
+  // CSV field escaping
+  assert.equal(escapeCsvField('simple'), 'simple');
+  assert.equal(escapeCsvField('has, comma'), '"has, comma"');
+  assert.equal(escapeCsvField('has "quote"'), '"has ""quote"""');
+
+  // Batch input parser handles mixed TSV and RFC 4180 CSV lines
   const batchRows = parseBatchInputText(
-    `owing to\nable\t已掌握\t核心词,高频\t已背完\nowing to\nunknownxyz`,
+    `owing to\n"able","已掌握","核心词,高频","基础四级词, 重要"\nowing to\nunknownxyz`,
     wordsMap,
     bundle.words
   );
@@ -214,10 +236,13 @@ owe\towing to
   assert.equal(batchRows[0].matchStatus, 'matched_exact');
   assert.equal(batchRows[1].parsedStatus, 'mastered');
   assert.deepEqual(batchRows[1].parsedTags, ['核心词', '高频']);
+  assert.equal(batchRows[1].parsedNote, '基础四级词, 重要');
   assert.equal(batchRows[2].isDuplicateInBatch, true);
   assert.equal(batchRows[3].matchStatus, 'unmatched');
 
-  // Filter and sort with user status
+  // Analytics partial vs full official CET entry coverage
+  // Entry "able \t ability" has 2 member slots: "able" and "ability".
+  // If only "able" is mastered, partial coverage = 1, full mastery = 0.
   const userRecords = new Map<string, UserWordRecord>([
     [
       'able',
@@ -233,14 +258,33 @@ owe\towing to
     ],
   ]);
 
-  const masteredOnly = filterAndSortWords(
+  const analyticsPartial = computeLexiconAnalytics(
     bundle.words,
-    userRecords,
-    { ...DEFAULT_FILTER_CRITERIA, statuses: ['mastered'] },
-    'word_asc'
+    bundle.families,
+    bundle.cetEntries,
+    userRecords
   );
-  assert.equal(masteredOnly.length, 1);
-  assert.equal(masteredOnly[0].id, 'able');
+  assert.equal(analyticsPartial.cet4OfficialPartialCovered, 1);
+  assert.equal(analyticsPartial.cet4OfficialFullMastered, 0);
+
+  // Once "ability" is also mastered, full mastery for the "able \t ability" entry becomes 1
+  userRecords.set('ability', {
+    wordId: 'ability',
+    word: 'ability',
+    status: 'mastered',
+    tags: [],
+    notes: '',
+    firstRecordedAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-02T00:00:00Z',
+  });
+  const analyticsFull = computeLexiconAnalytics(
+    bundle.words,
+    bundle.families,
+    bundle.cetEntries,
+    userRecords
+  );
+  assert.equal(analyticsFull.cet4OfficialPartialCovered, 1);
+  assert.equal(analyticsFull.cet4OfficialFullMastered, 1);
 
   // Dictionary URL builder strips ★ and superscripts ¹²³
   const cambridgeUrl = buildDictionaryUrl(
@@ -255,8 +299,8 @@ owe\towing to
   // Priority score check
   const priorityAble = computeStudyPriorityScore(wordsMap.get('able')!, userRecords.get('able'));
   assert.equal(priorityAble.score, 0); // mastered -> 0
-  const priorityAbility = computeStudyPriorityScore(wordsMap.get('ability')!);
-  assert.ok(priorityAbility.score > 500);
+  const priorityAdvise = computeStudyPriorityScore(wordsMap.get('advise')!);
+  assert.ok(priorityAdvise.score > 500);
 });
 
 test('Full real dataset integration test (CET2016.txt + BNC_COCA_lists.txt)', () => {
@@ -267,7 +311,29 @@ test('Full real dataset integration test (CET2016.txt + BNC_COCA_lists.txt)', ()
 
   const bundle = buildLexiconDatabase(cetRaw, bncRaw);
   assert.equal(bundle.diagnostics.cetTotalLines, 5377);
+  assert.equal(bundle.diagnostics.cetDistinctWordForms, 8014);
   assert.equal(bundle.diagnostics.bncFamilyCount, 25002);
+  assert.equal(bundle.diagnostics.bncTotalWordForms, 76126);
+  assert.equal(bundle.diagnostics.bncDistinctWordForms, 76125);
   assert.equal(bundle.diagnostics.bncBandsCount, 25);
-  assert.ok(bundle.words.length > 65000);
+  assert.equal(bundle.diagnostics.totalDistinctLexiconWords, 76331);
+  assert.equal(bundle.diagnostics.bothCetAndBncCount, 7825);
+  assert.equal(bundle.diagnostics.cetVariantLinkedCount, 17);
+  assert.equal(bundle.diagnostics.cetOnlyCount, 189);
+
+  const byId = new Map(bundle.words.map((w) => [w.id, w]));
+
+  // Verify specific audited CET variants do NOT borrow sibling frequency
+  for (const variantWord of ['sobre', 'oftentimes', 'airplane', "coup d'état", 'bbq']) {
+    const item = byId.get(variantWord);
+    assert.ok(item, `Expected ${variantWord} to exist in unified lexicon`);
+    assert.equal(item.inBnc, false, `Expected ${variantWord} inBnc=false`);
+    assert.equal(item.hasExactBncForm, false, `Expected ${variantWord} hasExactBncForm=false`);
+    assert.equal(item.formFrequency, null, `Expected ${variantWord} formFrequency=null`);
+    assert.equal(item.bncLinkedViaVariant, true, `Expected ${variantWord} bncLinkedViaVariant=true`);
+  }
+
+  // Verify multi-family BNC word "grannies" retains both memberships
+  const grannies = byId.get('grannies')!;
+  assert.equal(grannies.bncMemberships?.length, 2);
 });

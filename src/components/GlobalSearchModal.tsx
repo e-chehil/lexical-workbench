@@ -14,11 +14,13 @@ import {
   UserWordRecord,
 } from '../data/types.ts';
 import { searchLexicon } from '../data/searchAndFilter.ts';
+import { formatCompactFrequency } from '../utils/frequency.ts';
 
 interface GlobalSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   words: LexiconWordItem[];
+  familiesCount?: number;
   userRecordsMap: Map<string, UserWordRecord>;
   onSelectWord: (word: LexiconWordItem) => void;
   onInspectFamily: (familyId: string, highlightWord?: string) => void;
@@ -29,6 +31,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   isOpen,
   onClose,
   words,
+  familiesCount,
   userRecordsMap,
   onSelectWord,
   onInspectFamily,
@@ -169,9 +172,11 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
         {/* Results List */}
         <div className="overflow-y-auto overscroll-contain divide-y divide-[var(--border-subtle)] flex-1">
           {!query.trim() && (
-            <div className="px-4 py-1.5 bg-[var(--bg-canvas)] text-[11px] text-[var(--text-muted)] flex items-center justify-between">
-              <span>常用检索示例（支持屈折变形反查词族、同形词辨析与短语）</span>
-              <span className="font-mono-tabular">76,330 词形 · 25,002 词族</span>
+            <div className="px-4 py-1.5 bg-[var(--bg-canvas)] text-[11px] text-[var(--text-muted)] flex items-center justify-between gap-2">
+              <span className="truncate">常用检索示例（支持屈折变形反查词族、同形词辨析与短语）</span>
+              <span className="font-mono-tabular whitespace-nowrap shrink-0">
+                {words.length.toLocaleString()} 词形 · {(familiesCount ?? 25002).toLocaleString()} 词族
+              </span>
             </div>
           )}
 
@@ -257,10 +262,14 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
                     <div className="text-right font-mono-tabular text-xs shrink-0">
                       <div className="text-[var(--text-primary)] font-medium">
-                        {w.formFrequency !== null ? w.formFrequency.toLocaleString() : '未收录'}
+                        {w.formFrequency !== null
+                          ? formatCompactFrequency(w.formFrequency)
+                          : w.bncLinkedViaVariant
+                            ? '无独立频次'
+                            : '未收录'}
                       </div>
                       <div className="text-[11px] text-[var(--text-muted)]">
-                        族 {w.familyFrequency !== null ? w.familyFrequency.toLocaleString() : '—'}
+                        族 {w.familyFrequency !== null ? formatCompactFrequency(w.familyFrequency) : '—'}
                       </div>
                     </div>
                   </button>

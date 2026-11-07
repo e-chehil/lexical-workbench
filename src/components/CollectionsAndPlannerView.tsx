@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   LexiconWordItem,
   BncCocaFamily,
@@ -9,10 +9,15 @@ import {
   FilterCriteria,
 } from '../data/types.ts';
 import {
+  CLOSED_CLASS_STOPWORDS,
   DEFAULT_FILTER_CRITERIA,
   computeStudyPriorityScore,
   filterAndSortWords,
 } from '../data/searchAndFilter.ts';
+import {
+  formatCompactFrequency,
+  formatFamilyRoleAndShare,
+} from '../utils/frequency.ts';
 import {
   Plus,
   Trash2,
@@ -20,6 +25,8 @@ import {
   Compass,
   Check,
   Sparkles,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface CollectionsAndPlannerViewProps {
@@ -49,17 +56,7 @@ type PresetStrategy =
   | 'family_completion';
 
 const ALL_STATUSES: LearningStatus[] = ['unrated', 'queued', 'learning', 'mastered', 'deferred'];
-
-const CLOSED_CLASS_STOPWORDS = new Set([
-  'the', 'be', 'being', 'been', 'am', 'is', 'are', 'was', 'were', 'of', 'and', 'to', 'a', 'an',
-  'in', 'that', 'it', 'its', 'itself', 'for', 'i', 'me', 'my', 'mine', 'myself', 'on', 'you',
-  'your', 'yours', 'yourself', 'with', 'as', 'he', 'him', 'his', 'himself', 'at', 'by', 'this',
-  'these', 'those', 'have', 'has', 'had', 'having', 'from', 'or', 'one', 'not', 'but', 'what',
-  'all', 'we', 'us', 'our', 'ours', 'when', 'can', 'could', 'there', 'she', 'her', 'hers',
-  'which', 'their', 'theirs', 'they', 'them', 'will', 'would', 'who', 'whom', 'whose', 'do',
-  'does', 'did', 'done', 'doing', 'no', 'yes', 'so', 'if', 'up', 'out', 'about', 'into', 'than',
-  'then', 'now', 'only', 'other', 'some', 'such', 'more', 'most', 'very', 'also', 'any', 'each',
-]);
+const PAGE_SIZE = 100;
 
 export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps> = ({
   collections,
@@ -79,21 +76,51 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     collections[0]?.id || 'builtin-cet4-core'
   );
   const [mobilePane, setMobilePane] = useState<'list' | 'planner'>('list');
-  // On md/lg (768px-1279px), the center table can display either the active collection OR the planner preview
   const [centerMode, setCenterMode] = useState<'collection' | 'planner_preview'>('collection');
   const [strategy, setStrategy] = useState<PresetStrategy>('cet4_core_1k_3k');
   const [batchSize, setBatchSize] = useState<number>(50);
   const [batchName, setBatchName] = useState<string>('');
+  // Default FALSE so saving a study batch NEVER silently overwrites existing statuses!
+  const [markUnratedAsQueued, setMarkUnratedAsQueued] = useState<boolean>(false);
   const [justCreated, setJustCreated] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newWordsRaw, setNewWordsRaw] = useState('');
 
+  const centerRef = useRef<HTMLDivElement>(null);
+  const [centerWidth, setCenterWidth] = useState<number>(800);
+
+  useEffect(() => {
+    const el = centerRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0) setCenterWidth(el.clientWidth);
+    };
+    updateWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const obs = new ResizeObserver(updateWidth);
+      obs.observe(el);
+      return () => obs.disconnect();
+    } else {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+  }, []);
+
+  const isCompactCenter = centerWidth < 560;
+
   const activeCollection = useMemo(() => {
     return collections.find((c) => c.id === selectedCollectionId) || collections[0] || null;
   }, [collections, selectedCollectionId]);
+
+  // Reset pagination when switching collection
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeCollection?.id]);
 
   const activeCollectionWords = useMemo(() => {
     if (!activeCollection) return [];
@@ -110,6 +137,13 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
       .map((id) => wordsMap.get(id))
       .filter((w): w is LexiconWordItem => Boolean(w));
   }, [activeCollection, words, wordsMap, userRecordsMap, familiesMap]);
+
+  const totalPages = Math.max(1, Math.ceil(activeCollectionWords.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedCollectionWords = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return activeCollectionWords.slice(start, start + PAGE_SIZE);
+  }, [activeCollectionWords, safePage]);
 
   const plannerCandidates = useMemo(() => {
     const masteredFamilies = new Set<string>();
@@ -192,7 +226,17 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         createdAt: new Date().toISOString(),
       },
     });
-    onBatchSetStatus(ids, 'queued');
+
+    // Only update status if user explicitly opted in, and NEVER overwrite learning/mastered words!
+    if (markUnratedAsQueued) {
+      const unratedOnlyIds = ids.filter(
+        (id) => (userRecordsMap.get(id)?.status || 'unrated') === 'unrated'
+      );
+      if (unratedOnlyIds.length > 0) {
+        onBatchSetStatus(unratedOnlyIds, 'queued');
+      }
+    }
+
     setBatchName('');
     setJustCreated(true);
     setCenterMode('collection');
@@ -221,11 +265,6 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     setNewDesc('');
     setNewWordsRaw('');
   };
-
-  const maxFreqInCollection = useMemo(() => {
-    if (activeCollectionWords.length === 0) return 10000;
-    return Math.max(...activeCollectionWords.map((w) => w.formFrequency || 0), 100);
-  }, [activeCollectionWords]);
 
   const plannerFormControls = (
     <div className="space-y-2.5">
@@ -276,6 +315,16 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         </div>
       </div>
 
+      <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer select-none pt-0.5">
+        <input
+          type="checkbox"
+          checked={markUnratedAsQueued}
+          onChange={(e) => setMarkUnratedAsQueued(e.target.checked)}
+          className="rounded border-[var(--border-strong)]"
+        />
+        <span>同时将批次内「未评」词条标为「待学」（不覆盖在学/掌握）</span>
+      </label>
+
       <button
         type="button"
         onClick={handleSaveBatchAsCollection}
@@ -285,19 +334,27 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         {justCreated ? (
           <>
             <Check className="w-3.5 h-3.5" />
-            已生成词集并标为待学
+            <span>已保存至词集列表</span>
           </>
         ) : (
-          <>生成学习批次 ({plannerCandidates.length} 词)</>
+          <>保存为学习批次 ({plannerCandidates.length} 词)</>
         )}
       </button>
     </div>
   );
 
+  const collectionGridClass = isCompactCenter
+    ? 'grid grid-cols-[minmax(96px,1.4fr)_56px_78px_68px]'
+    : 'grid grid-cols-[minmax(115px,1.3fr)_60px_minmax(96px,1fr)_minmax(90px,0.9fr)_88px_74px]';
+
+  const plannerGridClass = isCompactCenter
+    ? 'grid grid-cols-[36px_minmax(100px,1.3fr)_58px_minmax(90px,1fr)_56px]'
+    : 'grid grid-cols-[42px_minmax(115px,1.2fr)_64px_minmax(105px,1fr)_minmax(110px,1fr)_64px]';
+
   return (
     <div className="flex flex-col md:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
       {/* Mobile Sub-View Switcher (<768px only) */}
-      <div className="md:hidden min-h-[42px] py-1.5 px-4 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+      <div className="md:hidden min-h-[42px] py-1.5 px-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
@@ -324,12 +381,12 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         </div>
 
         {mobilePane === 'list' && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <select
               value={activeCollection?.id || ''}
               onChange={(e) => setSelectedCollectionId(e.target.value)}
               aria-label="选择词集"
-              className="max-w-[160px] px-2 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] truncate"
+              className="max-w-[150px] px-2 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] truncate"
             >
               {collections.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -340,7 +397,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             <button
               type="button"
               onClick={() => setShowNewModal(true)}
-              className="p-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--accent-primary)] cursor-pointer"
+              className="p-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--accent-primary)] cursor-pointer shrink-0"
               title="新建词集"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -349,8 +406,8 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         )}
       </div>
 
-      {/* Zone 1: Left Collections Directory + Integrated Medium-Screen Planner Studio (md: 270px, lg: 300px, xl: 260px) */}
-      <aside className="hidden md:flex md:w-[270px] lg:w-[300px] xl:w-[260px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full min-h-0">
+      {/* Zone 1: Left Collections Directory + Integrated Medium-Screen Planner Studio */}
+      <aside className="hidden md:flex md:w-[240px] lg:w-[270px] xl:w-[260px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full min-h-0">
         <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
           <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
             词集与学习批次 ({collections.length})
@@ -374,7 +431,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                     words,
                     userRecordsMap,
                     col.filterCriteria,
-                    col.sortField || 'form_freq_desc',
+                    col.sortField || 'priority_weight_desc',
                     familiesMap
                   )
                 : col.wordIds
@@ -440,25 +497,25 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
           })}
         </div>
 
-        {/* Integrated Next-Batch Planner on Medium Screens (768px - 1279px) so 2-Column Layout is Rich & Balanced */}
-        <div className="xl:hidden p-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2.5 shrink-0">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
-              下一批学习规划器
+        {/* Integrated Next-Batch Planner on Medium Screens (768px - 1279px) */}
+        <div className="xl:hidden p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2 shrink-0">
+          <div className="flex items-center justify-between gap-1">
+            <h3 className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] flex items-center gap-1 truncate">
+              <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" />
+              <span className="truncate">学习规划器</span>
             </h3>
             <button
               type="button"
               onClick={() =>
                 setCenterMode((m) => (m === 'planner_preview' ? 'collection' : 'planner_preview'))
               }
-              className={`text-[11px] font-medium px-2 py-0.5 rounded border cursor-pointer transition-colors ${
+              className={`text-[11px] font-medium px-2 py-0.5 rounded border cursor-pointer transition-colors shrink-0 ${
                 centerMode === 'planner_preview'
                   ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
                   : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              {centerMode === 'planner_preview' ? '返回词集表' : `预览候选 (${plannerCandidates.length})`}
+              {centerMode === 'planner_preview' ? '返回词集' : `预览 (${plannerCandidates.length})`}
             </button>
           </div>
           {plannerFormControls}
@@ -467,45 +524,48 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
       {/* Zone 2: Center Main Table (Collection Word Table OR Medium-Screen Planner Preview) */}
       <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
+        ref={centerRef}
+        className={`lexicon-table-container flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
           mobilePane === 'list' ? 'flex' : 'hidden md:flex'
         }`}
       >
         {centerMode === 'planner_preview' ? (
           <>
-            <div className="px-4 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
-              <div>
-                <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)]">
+            <div className="px-3.5 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)] truncate">
                   下一批候选实词优先级预览 ({plannerCandidates.length} 词)
                 </h2>
-                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate">
                   已按词频、四六级大纲权重与熟词族派生杠杆综合排序
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setCenterMode('collection')}
-                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
               >
                 返回当前词集
               </button>
             </div>
 
-            <div className="grid grid-cols-[44px_minmax(120px,1.3fr)_68px_minmax(110px,1fr)_120px_76px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div
+              className={`${plannerGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
+            >
               <div>序号</div>
               <div>候选词条</div>
               <div>大纲</div>
-              <div>所属词族与频段</div>
-              <div>推荐理由</div>
+              <div>词族与频段</div>
+              {!isCompactCenter && <div>推荐理由</div>}
               <div className="text-right">权重分</div>
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
               {plannerCandidates.map(({ entry, score, reason }, idx) => (
                 <div
                   key={entry.id}
                   onClick={() => onSelectWord(entry)}
-                  className="grid grid-cols-[44px_minmax(120px,1.3fr)_68px_minmax(110px,1fr)_120px_76px] items-center px-4 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs"
+                  className={`${plannerGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs`}
                 >
                   <div className="font-mono-tabular text-[var(--text-muted)]">{idx + 1}.</div>
                   <div
@@ -514,7 +574,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   >
                     {entry.word}
                   </div>
-                  <div className="font-mono-tabular">
+                  <div className="font-mono-tabular whitespace-nowrap">
                     {entry.isCet4 ? (
                       <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
                         CET-4
@@ -530,7 +590,11 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   <div className="font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
                     {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
                   </div>
-                  <div className="text-[11px] text-[var(--text-muted)] truncate pr-2">{reason}</div>
+                  {!isCompactCenter && (
+                    <div className="text-[11px] text-[var(--text-muted)] truncate pr-2">
+                      {reason}
+                    </div>
+                  )}
                   <div className="text-right font-mono-tabular font-semibold text-[var(--accent-primary)]">
                     {score}
                   </div>
@@ -540,7 +604,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
           </>
         ) : activeCollection ? (
           <>
-            <div className="px-4 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
+            <div className="px-3.5 sm:px-5 py-2.5 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 shrink-0 bg-[var(--bg-surface)]">
               <div className="min-w-0">
                 <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)] truncate">
                   {activeCollection.name}
@@ -559,10 +623,10 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                         activeCollection.filterCriteria || DEFAULT_FILTER_CRITERIA
                       )
                     }
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     <Compass className="w-3.5 h-3.5" />
-                    在词库中筛选
+                    <span>在词库中筛选</span>
                   </button>
                 )}
                 <button
@@ -570,56 +634,60 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   onClick={() =>
                     onExportWordList(activeCollectionWords, activeCollection.name, 'txt')
                   }
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  导出 TXT
+                  <span>TXT</span>
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     onExportWordList(activeCollectionWords, activeCollection.name, 'csv')
                   }
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  导出 CSV
+                  <span>CSV</span>
                 </button>
               </div>
             </div>
 
             {/* Table Column Header */}
-            <div className="grid grid-cols-[minmax(105px,1.3fr)_58px_100px_76px] sm:grid-cols-[minmax(120px,1.2fr)_64px_minmax(100px,1fr)_minmax(96px,0.9fr)_126px_80px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div
+              className={`${collectionGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
+            >
               <div>词条</div>
               <div>大纲</div>
-              <div className="hidden sm:block">词族与频段</div>
-              <div className="hidden sm:block">同族规模</div>
-              <div className="text-right pr-2">词形 / 词族频次</div>
+              {!isCompactCenter && <div>词族与频段</div>}
+              {!isCompactCenter && <div>同族占比</div>}
+              <div className="text-right pr-2">词形频次</div>
               <div className="text-right">状态</div>
             </div>
 
-            {/* Rows */}
-            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-              {activeCollectionWords.slice(0, 300).map((entry) => {
+            {/* Paginated Rows (No 300-item hard cap!) */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
+              {pagedCollectionWords.map((entry) => {
                 const status = userRecordsMap.get(entry.id)?.status || 'unrated';
                 const statusMeta = LEARNING_STATUS_META[status];
-                const barWidth = Math.min(
-                  100,
-                  Math.max(
-                    4,
-                    Math.round(
-                      (Math.log10((entry.formFrequency || 0) + 1) /
-                        Math.log10(maxFreqInCollection + 1)) *
-                        100
-                    )
-                  )
+                const freqText = formatCompactFrequency(
+                  entry.formFrequency,
+                  entry.inBnc,
+                  entry.bncLinkedViaVariant
+                );
+                const roleAndShare = formatFamilyRoleAndShare(
+                  entry.isHeadword,
+                  entry.familyMemberCount,
+                  entry.formFrequency,
+                  entry.familyFrequency,
+                  entry.inBnc,
+                  entry.bncLinkedViaVariant
                 );
 
                 return (
                   <div
                     key={entry.id}
                     onClick={() => onSelectWord(entry)}
-                    className="grid grid-cols-[minmax(105px,1.3fr)_58px_100px_76px] sm:grid-cols-[minmax(120px,1.2fr)_64px_minmax(100px,1fr)_minmax(96px,0.9fr)_126px_80px] items-center px-4 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className={`${collectionGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors`}
                   >
                     <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
                       <span
@@ -629,65 +697,78 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                         {entry.word}
                       </span>
                       {!entry.isHeadword && entry.headword && (
-                        <span translate="no" className="text-[11px] text-[var(--text-muted)] truncate">
+                        <span
+                          translate="no"
+                          className="text-[11px] text-[var(--text-muted)] truncate"
+                        >
                           ← {entry.headword}
                         </span>
                       )}
                     </div>
 
                     <div className="text-xs font-mono-tabular whitespace-nowrap">
-                      {entry.isCet4 && (
+                      {entry.isCet4 && entry.isCet6 ? (
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                          CET-4/6
+                        </span>
+                      ) : entry.isCet4 ? (
                         <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
                           CET-4
                         </span>
-                      )}
-                      {entry.isCet6 && (
+                      ) : entry.isCet6 ? (
                         <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
                           CET-6
                         </span>
-                      )}
-                      {!entry.isCet4 && !entry.isCet6 && (
+                      ) : (
                         <span className="text-[var(--text-muted)]">—</span>
                       )}
                     </div>
 
-                    <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
-                      {entry.band ? (
-                        <>
-                          <span className="font-semibold text-[var(--text-primary)]">
-                            {entry.band}
-                          </span>
-                          <span className="text-[var(--text-muted)]">·</span>
-                          <span translate="no" className="font-serif-lexicon truncate">
-                            {entry.headword}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-[var(--text-muted)]">大纲外词</span>
-                      )}
-                    </div>
-
-                    <div className="hidden sm:block text-[11px] font-mono-tabular text-[var(--text-muted)] truncate pr-2">
-                      {entry.familyId
-                        ? `${entry.isHeadword ? '词头' : '派生'} · 族${entry.familyMemberCount}词`
-                        : '独立词条'}
-                    </div>
-
-                    <div className="text-right pr-2 font-mono-tabular">
-                      <div className="flex items-baseline justify-end gap-1 text-xs whitespace-nowrap">
-                        <span className="font-medium text-[var(--text-primary)]">
-                          {(entry.formFrequency || 0).toLocaleString()}
-                        </span>
-                        <span className="text-[10px] text-[var(--text-muted)]">
-                          /{(entry.familyFrequency || 0).toLocaleString()}
-                        </span>
+                    {!isCompactCenter && (
+                      <div className="flex items-center gap-1 text-xs font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
+                        {entry.band ? (
+                          <>
+                            <span className="font-semibold text-[var(--text-primary)]">
+                              {entry.band}
+                            </span>
+                            <span className="text-[var(--text-muted)]">·</span>
+                            <span translate="no" className="font-serif-lexicon truncate">
+                              {entry.headword}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[var(--text-muted)]">大纲独立词</span>
+                        )}
                       </div>
-                      <div className="hidden sm:block h-1 w-20 ml-auto mt-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
-                        <div
-                          className="h-full bg-[var(--accent-primary)] opacity-75"
-                          style={{ width: `${barWidth}%` }}
-                        />
+                    )}
+
+                    {!isCompactCenter && (
+                      <div className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate pr-2">
+                        {roleAndShare}
                       </div>
+                    )}
+
+                    <div
+                      className="text-right pr-2 font-mono-tabular text-xs whitespace-nowrap"
+                      title={
+                        entry.formFrequency !== null
+                          ? `词形实测频次: ${entry.formFrequency.toLocaleString()}${
+                              entry.familyFrequency !== null
+                                ? ` · 词族总频次: ${entry.familyFrequency.toLocaleString()}`
+                                : ''
+                            }`
+                          : '无独立频次记录'
+                      }
+                    >
+                      <span
+                        className={
+                          entry.formFrequency === 0 || entry.formFrequency === null
+                            ? 'text-[var(--text-muted)]'
+                            : 'font-medium text-[var(--text-primary)]'
+                        }
+                      >
+                        {freqText}
+                      </span>
                     </div>
 
                     <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
@@ -714,13 +795,47 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                 );
               })}
             </div>
+
+            {/* Pagination Footer when total > PAGE_SIZE */}
+            {totalPages > 1 && (
+              <div className="px-3.5 sm:px-5 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 text-xs shrink-0">
+                <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                  显示 {(safePage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(safePage * PAGE_SIZE, activeCollectionWords.length)} / 共{' '}
+                  {activeCollectionWords.length.toLocaleString()} 词
+                </span>
+                <div className="flex items-center gap-1.5 font-mono-tabular">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>上一页</span>
+                  </button>
+                  <span className="px-2 text-[11px] text-[var(--text-secondary)]">
+                    {safePage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
+                  >
+                    <span>下一页</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ) : null}
       </div>
 
-      {/* Zone 3: Right Next-Batch Planner Studio (xl+ 350px, or mobile <768px when planner tab active) */}
+      {/* Zone 3: Right Next-Batch Planner Studio (xl+ 340px, or mobile <768px when planner tab active) */}
       <aside
-        className={`w-full xl:w-[350px] xl:border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 xl:flex-initial h-full min-h-0 overflow-hidden ${
+        className={`w-full xl:w-[340px] xl:border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 xl:flex-initial h-full min-h-0 overflow-hidden ${
           mobilePane === 'planner' ? 'flex md:hidden xl:flex' : 'hidden xl:flex'
         }`}
       >
@@ -803,49 +918,49 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="例如：经济学人真题高频词"
+                  placeholder="如：阅读真题高频难词"
                   className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                  备注说明 (选填)
+                  描述说明
                 </label>
                 <input
                   type="text"
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="来源或学习目标..."
+                  placeholder="选填..."
                   className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                  初始词表 (每行或逗号分隔，自动匹配词库)
+                  初始词表 (每行或逗号分隔)
                 </label>
                 <textarea
                   rows={5}
                   value={newWordsRaw}
                   onChange={(e) => setNewWordsRaw(e.target.value)}
-                  placeholder="govern, ability, sustainable..."
-                  className="w-full px-3 py-2 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                  placeholder="粘贴单词或短语，自动匹配词库..."
+                  className="w-full p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
-            </div>
-            <div className="px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowNewModal(false)}
-                className="px-3 py-1.5 rounded text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-[var(--accent-primary)] text-white rounded text-xs font-semibold cursor-pointer"
-              >
-                创建词集
-              </button>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewModal(false)}
+                  className="px-3 py-1.5 border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-[var(--accent-primary)] text-white rounded text-xs font-semibold cursor-pointer"
+                >
+                  创建词集
+                </button>
+              </div>
             </div>
           </form>
         </div>

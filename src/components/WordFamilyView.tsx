@@ -468,7 +468,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
           </div>
 
           {/* Column Headers */}
-          <div className="grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+          <div className="grid grid-cols-[minmax(88px,1.3fr)_52px_68px_80px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
             <div>词形与角色</div>
             <div>大纲</div>
             <div className="hidden sm:block">族内频次占比</div>
@@ -477,7 +477,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
           </div>
 
           {/* Member Rows + Medium/Narrow Inline Syllabus & Mastery Deck */}
-          <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
             {activeMembers.map((member) => {
               const entry = wordsMap.get(member.normalized);
               const status = userRecordsMap.get(member.normalized)?.status || 'unrated';
@@ -494,7 +494,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                   onClick={() => {
                     if (entry) onSelectWord(entry);
                   }}
-                  className={`grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
+                  className={`grid grid-cols-[minmax(88px,1.3fr)_52px_68px_80px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-3.5 sm:px-5 py-2.5 cursor-pointer transition-colors ${
                     isHighlighted
                       ? 'bg-[var(--accent-soft)]'
                       : 'hover:bg-[var(--bg-hover)]'
