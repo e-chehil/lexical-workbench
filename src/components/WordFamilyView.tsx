@@ -7,7 +7,11 @@ import {
   LEARNING_STATUS_META,
   DictionaryTemplate,
 } from '../data/types.ts';
-import { buildDictionaryUrl } from '../data/searchAndFilter.ts';
+import {
+  buildDictionaryUrl,
+  selectFamilyCetWordIdsForQueue,
+} from '../data/searchAndFilter.ts';
+import { getIntraFamilyShareDetail } from '../utils/frequency.ts';
 import {
   Search,
   ExternalLink,
@@ -53,9 +57,12 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
   const [memberFilter, setMemberFilter] = useState<MemberFilter>('all');
   const [memberSort, setMemberSort] = useState<'freq_desc' | 'alpha_asc'>('freq_desc');
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
+  const [overwriteCetStatus, setOverwriteCetStatus] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
+  const centerPaneRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  const [centerWidth, setCenterWidth] = useState(720);
 
   const filteredFamilies = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -99,6 +106,18 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
     }
     return filteredFamilies[0] || families[0] || null;
   }, [families, selectedFamilyId, filteredFamilies]);
+
+  useEffect(() => {
+    const el = centerPaneRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCenterWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeFamily?.id, mobileShowDetail]);
 
   useEffect(() => {
     if (listRef.current) {
@@ -350,6 +369,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
       {/* Zone 2: Center Member Frequency Spectrum */}
       {activeFamily ? (
         <div
+          ref={centerPaneRef}
           className={`flex-1 flex flex-col min-w-0 h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden ${
             mobileShowDetail ? 'flex' : 'hidden md:flex'
           }`}
@@ -394,7 +414,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() =>
@@ -407,23 +427,55 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                 >
                   全族标为掌握
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cetKeys = activeFamily.members
-                      .filter((m) => {
-                        const e = wordsMap.get(m.normalized);
-                        return e?.isCet4 || e?.isCet6;
-                      })
-                      .map((m) => m.normalized);
-                    if (cetKeys.length > 0) {
-                      onBatchSetStatus(cetKeys, 'queued');
-                    }
-                  }}
-                  className="px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  大纲词标为待学
-                </button>
+                {(() => {
+                  const unratedCetIds = selectFamilyCetWordIdsForQueue(
+                    activeFamily,
+                    wordsMap,
+                    userRecordsMap,
+                    false
+                  );
+                  const allCetIds = selectFamilyCetWordIdsForQueue(
+                    activeFamily,
+                    wordsMap,
+                    userRecordsMap,
+                    true
+                  );
+                  const targetCetIds = overwriteCetStatus ? allCetIds : unratedCetIds;
+                  const hasRatedCetMembers = allCetIds.length > unratedCetIds.length;
+
+                  return (
+                    <div className="inline-flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={targetCetIds.length === 0}
+                        onClick={() => {
+                          if (targetCetIds.length > 0) {
+                            onBatchSetStatus(targetCetIds, 'queued');
+                          }
+                        }}
+                        title={
+                          overwriteCetStatus
+                            ? '将族内全部四六级大纲词设为待学（含已掌握/学习中词）'
+                            : '仅将族内尚未分级的四六级大纲词设为待学（保护已掌握/学习中词）'
+                        }
+                        className="px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] disabled:opacity-45 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        大纲词标为待学 ({targetCetIds.length})
+                      </button>
+                      {hasRatedCetMembers && (
+                        <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] cursor-pointer select-none whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={overwriteCetStatus}
+                            onChange={(e) => setOverwriteCetStatus(e.target.checked)}
+                            className="rounded border-[var(--border-subtle)]"
+                          />
+                          <span>含已标注词</span>
+                        </label>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -467,14 +519,21 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
             </button>
           </div>
 
-          {/* Column Headers */}
-          <div className="grid grid-cols-[minmax(88px,1.3fr)_52px_68px_80px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-            <div>词形与角色</div>
-            <div>大纲</div>
-            <div className="hidden sm:block">族内频次占比</div>
-            <div className="text-right pr-2">独立频次</div>
-            <div className="text-right">状态与词典</div>
-          </div>
+          {/* Column Headers (Adaptive to centerPane container width) */}
+          {centerWidth >= 560 ? (
+            <div className="grid grid-cols-[minmax(120px,1.25fr)_60px_minmax(110px,1fr)_82px_94px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+              <div>词形与角色</div>
+              <div>大纲</div>
+              <div>族内频次占比</div>
+              <div className="text-right pr-2">独立频次</div>
+              <div className="text-right">状态与词典</div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+              <span>词形 · 大纲 · 族内占比</span>
+              <span>实测频次 · 学习状态</span>
+            </div>
+          )}
 
           {/* Member Rows + Medium/Narrow Inline Syllabus & Mastery Deck */}
           <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
@@ -482,11 +541,105 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
               const entry = wordsMap.get(member.normalized);
               const status = userRecordsMap.get(member.normalized)?.status || 'unrated';
               const statusMeta = LEARNING_STATUS_META[status];
-              const pct =
-                activeFamily.totalFrequency > 0
-                  ? Math.round((member.frequency / activeFamily.totalFrequency) * 100)
-                  : 0;
+              const shareDetail = getIntraFamilyShareDetail(
+                member.frequency,
+                activeFamily.totalFrequency
+              );
               const isHighlighted = highlightedWordId === member.normalized;
+
+              if (centerWidth < 560) {
+                return (
+                  <div
+                    key={member.normalized}
+                    onClick={() => {
+                      if (entry) onSelectWord(entry);
+                    }}
+                    className={`px-3.5 py-2.5 cursor-pointer transition-colors space-y-1.5 ${
+                      isHighlighted ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex items-baseline gap-1.5">
+                        <span
+                          translate="no"
+                          className={`text-sm truncate ${
+                            member.isHeadword
+                              ? 'font-serif-lexicon font-bold text-[var(--text-primary)]'
+                              : 'font-medium text-[var(--text-secondary)]'
+                          }`}
+                        >
+                          {member.word}
+                        </span>
+                        <span className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0">
+                          {member.isHeadword ? '首词' : '派生'}
+                        </span>
+                        {entry?.isCet4 && (
+                          <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">
+                            CET-4
+                          </span>
+                        )}
+                        {entry?.isCet6 && (
+                          <span className="text-[11px] font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
+                            CET-6
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        className="flex items-center gap-1.5 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="font-mono-tabular text-xs text-[var(--text-secondary)]">
+                          {member.frequency.toLocaleString()}
+                        </span>
+                        <span className="font-mono-tabular text-[11px] text-[var(--text-muted)] w-8 text-right">
+                          {shareDetail.label}
+                        </span>
+                        <select
+                          aria-label={`${member.word} 学习状态`}
+                          value={status}
+                          onChange={(e) =>
+                            onStatusChange(
+                              member.normalized,
+                              member.word,
+                              e.target.value as LearningStatus
+                            )
+                          }
+                          className={`appearance-none text-center px-1.5 py-0.5 rounded text-[11px] font-medium border cursor-pointer transition-colors ${statusMeta.badgeClass}`}
+                        >
+                          {ALL_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {LEARNING_STATUS_META[st].shortLabel}
+                            </option>
+                          ))}
+                        </select>
+                        {defaultDict && (
+                          <a
+                            href={buildDictionaryUrl(defaultDict.urlTemplate, member.word)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`在 ${defaultDict.name} 中查询 ${member.word}`}
+                            className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-primary)] rounded transition-colors shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="h-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
+                      <div
+                        className={`h-full bg-[var(--accent-primary)] transition-all ${
+                          shareDetail.isUltraLowNonZero ? 'min-w-[2px]' : ''
+                        }`}
+                        style={{
+                          width: `${shareDetail.exactPct !== null ? shareDetail.exactPct : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -494,7 +647,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                   onClick={() => {
                     if (entry) onSelectWord(entry);
                   }}
-                  className={`grid grid-cols-[minmax(88px,1.3fr)_52px_68px_80px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-3.5 sm:px-5 py-2.5 cursor-pointer transition-colors ${
+                  className={`grid grid-cols-[minmax(120px,1.25fr)_60px_minmax(110px,1fr)_82px_94px] items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
                     isHighlighted
                       ? 'bg-[var(--accent-soft)]'
                       : 'hover:bg-[var(--bg-hover)]'
@@ -533,16 +686,20 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                     )}
                   </div>
 
-                  {/* Intra-family proportion bar (sm+) */}
-                  <div className="hidden sm:flex items-center gap-2 pr-3">
+                  {/* Intra-family proportion bar (faithful to real share: 0% for 0 freq, 2px hairline for <1% non-zero) */}
+                  <div className="flex items-center gap-2 pr-3">
                     <div className="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                       <div
-                        className="h-full bg-[var(--accent-primary)] transition-all"
-                        style={{ width: `${Math.max(pct, 2)}%` }}
+                        className={`h-full bg-[var(--accent-primary)] transition-all ${
+                          shareDetail.isUltraLowNonZero ? 'min-w-[2px]' : ''
+                        }`}
+                        style={{
+                          width: `${shareDetail.exactPct !== null ? shareDetail.exactPct : 0}%`,
+                        }}
                       />
                     </div>
                     <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-8 text-right">
-                      {pct}%
+                      {shareDetail.label}
                     </span>
                   </div>
 
@@ -576,7 +733,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                     </select>
                     {defaultDict && (
                       <a
-                        href={buildDictionaryUrl(member.word, defaultDict.urlTemplate)}
+                        href={buildDictionaryUrl(defaultDict.urlTemplate, member.word)}
                         target="_blank"
                         rel="noopener noreferrer"
                         title={`在 ${defaultDict.name} 中查询 ${member.word}`}

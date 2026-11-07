@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: bun run lint
 
+      - name: Run unit and integration tests
+        run: npx tsx --test src/data/parser.test.ts
+
       - name: Build static site for GitHub Pages (/lexical-workbench/)
         env:
           GITHUB_PAGES: "true"

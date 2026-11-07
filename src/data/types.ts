@@ -265,6 +265,11 @@ export interface ActivityLogEntry {
   newTags?: string[];
   previousNotes?: string;
   newNotes?: string;
+  previousStudyCount?: number;
+  newStudyCount?: number;
+  previousLastStudiedAt?: string;
+  newLastStudiedAt?: string;
+  existedBefore?: boolean;
   sourceLabel?: string;
 }
 

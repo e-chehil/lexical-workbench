@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Download,
   Upload,
@@ -38,7 +38,11 @@ interface SettingsAndDiagnosticsViewProps {
     type: 'cet2016' | 'bnc_coca',
     fileName: string,
     content: string
-  ) => Promise<void>;
+  ) => Promise<{
+    wordsCount: number;
+    familiesCount: number;
+    cetLinesCount: number;
+  } | void>;
   onResetCustomDatasets: () => Promise<void>;
   hasCustomDataset: boolean;
   onSelectWordByString: (wordStr: string) => void;
@@ -94,7 +98,10 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
     fileName: string;
     jsonText: string;
   } | null>(null);
-  const [datasetStatus, setDatasetStatus] = useState<string | null>(null);
+  const [datasetStatus, setDatasetStatus] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // Custom dictionary form
   const [newDictName, setNewDictName] = useState('');
@@ -105,6 +112,28 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
   const [diagSearch, setDiagSearch] = useState('');
   const [diagCategory, setDiagCategory] = useState<string>('all');
   const [diagPage, setDiagPage] = useState(0);
+
+  const rightPaneRef = useRef<HTMLDivElement>(null);
+  const [rightWidth, setRightWidth] = useState<number>(760);
+
+  useEffect(() => {
+    const el = rightPaneRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0) setRightWidth(el.clientWidth);
+    };
+    updateWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateWidth);
+      ro.observe(el);
+      return () => ro.disconnect();
+    } else {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+  }, [mobilePane, rightTab]);
+
+  const isCompactRight = rightWidth < 560;
 
   const executeBackupImport = async (jsonText: string, mode: 'merge' | 'overwrite') => {
     try {
@@ -165,10 +194,21 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
     if (!file) return;
     try {
       const text = await file.text();
-      await onUploadCustomDataset(type, file.name, text);
-      setDatasetStatus(`已载入自定义词表 ${file.name} 并完成实时解析`);
+      const res = await onUploadCustomDataset(type, file.name, text);
+      setDatasetStatus({
+        type: 'success',
+        text: res
+          ? `已校验并载入 ${file.name}（合并词形 ${res.wordsCount.toLocaleString()} · 词族 ${res.familiesCount.toLocaleString()} · 大纲行 ${res.cetLinesCount.toLocaleString()}）`
+          : `已载入自定义词表 ${file.name} 并完成实时解析`,
+      });
     } catch (err) {
-      setDatasetStatus(err instanceof Error ? err.message : '加载词表失败');
+      setDatasetStatus({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? `词表校验未通过：${err.message}（已保留当前可用词库）`
+            : '加载词表失败（已保留当前可用词库）',
+      });
     } finally {
       e.target.value = '';
     }
@@ -307,7 +347,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
             <div className="flex items-center gap-2.5">
               <label
                 className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]"
-                title="按更新时间保留最新学习状态，并自动合并标签与笔记"
+                title="按 updatedAt 时间戳严格以较新记录的状态、标签与词集为准（尊重主动重置或删除）；仅在时间戳相同时取并集"
               >
                 <input
                   type="radio"
@@ -318,7 +358,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
                     setPendingOverwritePayload(null);
                   }}
                 />
-                <span>保守合并</span>
+                <span>保守合并 (按最新时间)</span>
               </label>
               <label
                 className="inline-flex items-center gap-1 cursor-pointer text-[var(--text-secondary)]"
@@ -424,7 +464,10 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
             {hasCustomDataset && (
               <button
                 type="button"
-                onClick={onResetCustomDatasets}
+                onClick={async () => {
+                  await onResetCustomDatasets();
+                  setDatasetStatus(null);
+                }}
                 className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:underline cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -464,7 +507,21 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
           </div>
 
           {datasetStatus && (
-            <div className="text-xs text-emerald-700 dark:text-emerald-400">{datasetStatus}</div>
+            <div
+              role="status"
+              className={`p-2.5 border rounded text-xs flex items-start gap-1.5 ${
+                datasetStatus.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              {datasetStatus.type === 'success' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              )}
+              <span className="leading-relaxed">{datasetStatus.text}</span>
+            </div>
           )}
         </div>
 
@@ -504,6 +561,7 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
 
       {/* Zone 2: Right Pane - External Dictionaries & Parser Diagnostics Table */}
       <div
+        ref={rightPaneRef}
         className={`flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
           mobilePane !== 'backup' ? 'flex' : 'hidden lg:flex'
         }`}
@@ -684,63 +742,112 @@ export const SettingsAndDiagnosticsView: React.FC<SettingsAndDiagnosticsViewProp
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            {/* Diagnostics Table Header */}
-            <div className="grid grid-cols-[88px_minmax(90px,1.1fr)_minmax(110px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-              <div>诊断规则</div>
-              <div>源文件词目文本</div>
-              <div>规范化拆解词形</div>
-              <div className="hidden xl:block">解析说明</div>
-            </div>
+            {/* Diagnostics Table Header (Adaptive to rightPaneRef container width) */}
+            {isCompactRight ? (
+              <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <span>诊断规则 · 源文件文本</span>
+                <span>规范化拆解词形</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <div>诊断规则</div>
+                <div>源文件词目文本</div>
+                <div>规范化拆解词形</div>
+                <div>解析说明</div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-              {pagedDiagnostics.map((item) => (
-                <div
-                  key={item.id}
-                  className="grid grid-cols-[88px_minmax(90px,1.1fr)_minmax(110px,1.3fr)] xl:grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
-                >
-                  <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] whitespace-nowrap pr-2">
-                    {CATEGORY_LABELS[item.category]}
-                  </div>
-
-                  <div className="min-w-0 pr-3">
-                    <div
-                      translate="no"
-                      className="font-mono-tabular text-[var(--text-primary)] truncate"
-                    >
-                      {item.rawText}
+              {pagedDiagnostics.map((item) =>
+                isCompactRight ? (
+                  <div
+                    key={item.id}
+                    className="px-3.5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="font-mono-tabular text-[11px] font-medium text-[var(--text-secondary)] shrink-0">
+                        {CATEGORY_LABELS[item.category]}
+                      </span>
+                      <span
+                        translate="no"
+                        className="font-mono-tabular text-[var(--text-primary)] truncate"
+                      >
+                        {item.rawText}
+                      </span>
                     </div>
-                    <div className="xl:hidden text-[10px] text-[var(--text-muted)] truncate mt-0.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="text-[11px] text-[var(--text-muted)] truncate">
+                        {item.explanation}
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {item.parsedResult.map((resWord, i) => {
+                          const exists = wordsMap.has(resWord.toLowerCase());
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              translate="no"
+                              disabled={!exists}
+                              onClick={() => onSelectWordByString(resWord)}
+                              className={`px-1.5 py-0.5 rounded font-serif-lexicon text-xs border transition-colors ${
+                                exists
+                                  ? 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] cursor-pointer'
+                                  : 'border-transparent text-[var(--text-muted)]'
+                              }`}
+                            >
+                              {resWord}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={item.id}
+                    className="grid grid-cols-[104px_minmax(120px,1.1fr)_minmax(140px,1.3fr)_minmax(160px,1.4fr)] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
+                  >
+                    <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] whitespace-nowrap pr-2">
+                      {CATEGORY_LABELS[item.category]}
+                    </div>
+
+                    <div className="min-w-0 pr-3">
+                      <div
+                        translate="no"
+                        className="font-mono-tabular text-[var(--text-primary)] truncate"
+                      >
+                        {item.rawText}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1 pr-2">
+                      {item.parsedResult.map((resWord, i) => {
+                        const exists = wordsMap.has(resWord.toLowerCase());
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            translate="no"
+                            disabled={!exists}
+                            onClick={() => onSelectWordByString(resWord)}
+                            className={`px-1.5 py-0.5 rounded font-serif-lexicon text-xs border transition-colors ${
+                              exists
+                                ? 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] cursor-pointer'
+                                : 'border-transparent text-[var(--text-muted)]'
+                            }`}
+                          >
+                            {resWord}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">
                       {item.explanation}
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-1 pr-2">
-                    {item.parsedResult.map((resWord, i) => {
-                      const exists = wordsMap.has(resWord.toLowerCase());
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          translate="no"
-                          disabled={!exists}
-                          onClick={() => onSelectWordByString(resWord)}
-                          className={`px-1.5 py-0.5 rounded font-serif-lexicon text-xs border transition-colors ${
-                            exists
-                              ? 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] cursor-pointer'
-                              : 'border-transparent text-[var(--text-muted)]'
-                          }`}
-                        >
-                          {resWord}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="hidden xl:block text-[11px] text-[var(--text-muted)] truncate">
-                    {item.explanation}
-                  </div>
-                </div>
-              ))}
+                )
+              )}
             </div>
 
             {totalDiagPages > 1 && (

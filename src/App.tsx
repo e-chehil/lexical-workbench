@@ -33,7 +33,7 @@ import {
   UserWordRecord,
   WordCollection,
 } from './data/types.ts';
-import { buildLexiconDatabase } from './data/parser.ts';
+import { buildLexiconDatabase, validateCustomDatasetContent } from './data/parser.ts';
 import {
   DEFAULT_DICTIONARIES,
   DEFAULT_FILTER_CRITERIA,
@@ -274,6 +274,11 @@ export default function App() {
     }
   }, []);
 
+  const rawTextsRef = useRef<{ cetText: string; bncText: string }>({
+    cetText: '',
+    bncText: '',
+  });
+
   // Load Lexicon Data ONCE (no dependency on selectedFamilyId so switching families never reloads the corpus!)
   const loadLexiconData = useCallback(async () => {
     try {
@@ -319,6 +324,7 @@ export default function App() {
       }
 
       const built = buildLexiconDatabase(cetText, bncText);
+      rawTextsRef.current = { cetText, bncText };
       setBundle(built);
       setSelectedFamilyId((prev) => {
         if (prev && built.families.some((f) => f.id === prev)) return prev;
@@ -504,6 +510,7 @@ export default function App() {
         await refreshUserDbState();
       } catch (err) {
         showFeedbackToast(err instanceof Error ? err.message : '保存标签或笔记失败', 'error');
+        throw err;
       }
     },
     [refreshUserDbState, showFeedbackToast]
@@ -632,7 +639,7 @@ export default function App() {
           const rec = userRecordsMap.get(w.id);
           const status = rec?.status || 'unrated';
           const tags = (rec?.tags || []).join(';');
-          const notes = (rec?.notes || '').replace(/\r?\n/g, ' ');
+          const notes = rec?.notes || '';
           return [
             escapeCsvField(w.word),
             escapeCsvField(w.cetLevels.join('/')),
@@ -686,13 +693,29 @@ export default function App() {
             词库初始化失败
           </h1>
           <p className="text-xs text-[var(--text-secondary)]">{loadingError}</p>
-          <button
-            type="button"
-            onClick={loadLexiconData}
-            className="focus-ring px-4 py-2 rounded text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
-          >
-            重试加载
-          </button>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={loadLexiconData}
+              className="focus-ring px-4 py-2 rounded text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
+            >
+              重试加载
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await db.customDatasets.clear();
+                } catch {
+                  // ignore
+                }
+                await loadLexiconData();
+              }}
+              className="focus-ring px-4 py-2 rounded text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] cursor-pointer"
+            >
+              恢复内置词表并重试
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1019,19 +1042,33 @@ export default function App() {
                 await loadLexiconData();
                 await refreshUserDbState();
                 showFeedbackToast(
-                  `已${mode === 'overwrite' ? '完整覆盖恢复' : '保守合并'} ${res.importedWords} 条词汇记录`
+                  `已${mode === 'overwrite' ? '完整覆盖恢复' : '按更新时间合并'} ${res.importedWords} 条词汇记录`
                 );
                 return res;
               }}
               onUploadCustomDataset={async (type, fileName, content) => {
+                // 1. Validate format and non-empty parsed entries BEFORE touching IndexedDB
+                const validation = validateCustomDatasetContent(type, content);
+                // 2. Test-build full lexicon in memory against the companion active dataset
+                const nextCet = type === 'cet2016' ? content : rawTextsRef.current.cetText;
+                const nextBnc = type === 'bnc_coca' ? content : rawTextsRef.current.bncText;
+                const built = buildLexiconDatabase(nextCet, nextBnc);
+                if (built.words.length === 0) {
+                  throw new Error('自定义词表解析后总词条数为 0，已取消替换并保留原词库');
+                }
+                // 3. Only persist and swap state after validation + build succeed
                 await db.customDatasets.put({
                   id: type,
                   fileName,
                   content,
                   updatedAt: new Date().toISOString(),
                 });
-                await loadLexiconData();
-                showFeedbackToast(`已载入自定义词表 ${fileName}`);
+                rawTextsRef.current = { cetText: nextCet, bncText: nextBnc };
+                setHasCustomDataset(true);
+                setBundle(built);
+                showFeedbackToast(
+                  `已验证并载入自定义词表 ${fileName}（解析 ${validation.entriesCount.toLocaleString()} 条记录）`
+                );
               }}
               onResetCustomDatasets={async () => {
                 await db.customDatasets.clear();

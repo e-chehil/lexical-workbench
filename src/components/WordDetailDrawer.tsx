@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   ChevronRight,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   ActivityLogEntry,
@@ -20,6 +21,7 @@ import {
   WordCollection,
 } from '../data/types.ts';
 import { buildDictionaryUrl } from '../data/searchAndFilter.ts';
+import { getIntraFamilyShareDetail } from '../utils/frequency.ts';
 
 interface WordDetailDrawerProps {
   word: LexiconWordItem | null;
@@ -33,7 +35,12 @@ interface WordDetailDrawerProps {
   onClose: () => void;
   onStatusChange: (wordId: string, wordDisplay: string, status: LearningStatus) => void;
   onStudyTouch?: (wordId: string, wordDisplay: string) => void;
-  onSaveTagsAndNotes: (wordId: string, wordDisplay: string, tags: string[], notes: string) => void;
+  onSaveTagsAndNotes: (
+    wordId: string,
+    wordDisplay: string,
+    tags: string[],
+    notes: string
+  ) => Promise<void> | void;
   onSelectWordById: (wordId: string) => void;
   onInspectFamily: (familyId: string, highlightWordId?: string) => void;
   onAddWordToCollection: (collectionId: string, wordId: string) => void;
@@ -71,49 +78,126 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
   const [notes, setNotes] = useState('');
   const [copied, setCopied] = useState(false);
   const [notesDirty, setNotesDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const [drawerWidth, setDrawerWidth] = useState<number>(360);
+
+  // Measure actual drawer container width so layout adapts to 360px panel regardless of viewport breakpoint
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setDrawerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Track previous word & dirty state so switching words auto-saves dirty notes
-  // and updating status/tags on the SAME word never overwrites unsaved or in-flight note edits!
+  // and retains unsaved drafts if a save fails!
   const prevWordRef = useRef<{ id: string; word: string } | null>(null);
   const pendingSavedNotesRef = useRef<string | null>(null);
-  const inFlightSavePromiseRef = useRef<Promise<unknown> | null>(null);
+  const inFlightSavePromiseRef = useRef<Promise<boolean> | null>(null);
+  const unsavedDraftsByWordRef = useRef<
+    Map<string, { tags: string[]; notes: string; error: string | null }>
+  >(new Map());
   const latestNotesRef = useRef<{ tags: string[]; notes: string; dirty: boolean }>({
     tags: [],
     notes: '',
     dirty: false,
   });
 
+  const performSaveForWord = async (
+    targetWordId: string,
+    targetWordDisplay: string,
+    tagsToSave: string[],
+    notesToSave: string,
+    isCurrentActiveWord: boolean
+  ): Promise<boolean> => {
+    if (isCurrentActiveWord) {
+      setIsSavingNotes(true);
+      setSaveError(null);
+      pendingSavedNotesRef.current = notesToSave;
+    }
+    try {
+      await Promise.resolve(
+        onSaveTagsAndNotes(targetWordId, targetWordDisplay, tagsToSave, notesToSave)
+      );
+      unsavedDraftsByWordRef.current.delete(targetWordId);
+      if (isCurrentActiveWord && prevWordRef.current?.id === targetWordId) {
+        // Only clear dirty flag if user hasn't typed newer characters while save was in flight
+        if (latestNotesRef.current.notes === notesToSave) {
+          latestNotesRef.current.dirty = false;
+          setNotesDirty(false);
+        }
+        setSaveError(null);
+      }
+      return true;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : '保存笔记失败，请重试';
+      unsavedDraftsByWordRef.current.set(targetWordId, {
+        tags: tagsToSave,
+        notes: notesToSave,
+        error: errMsg,
+      });
+      if (isCurrentActiveWord && prevWordRef.current?.id === targetWordId) {
+        pendingSavedNotesRef.current = null;
+        latestNotesRef.current.dirty = true;
+        setNotesDirty(true);
+        setSaveError(errMsg);
+      }
+      return false;
+    } finally {
+      if (isCurrentActiveWord) {
+        setIsSavingNotes(false);
+      }
+    }
+  };
+
   // When switching to a different word, flush any unsaved notes for the previous word first
   useEffect(() => {
     if (!word) return;
     if (prevWordRef.current && prevWordRef.current.id !== word.id) {
       if (latestNotesRef.current.dirty) {
-        inFlightSavePromiseRef.current = Promise.resolve(
-          onSaveTagsAndNotes(
-            prevWordRef.current.id,
-            prevWordRef.current.word,
-            latestNotesRef.current.tags,
-            latestNotesRef.current.notes
-          )
+        const prevId = prevWordRef.current.id;
+        const prevWordText = prevWordRef.current.word;
+        const prevTags = latestNotesRef.current.tags;
+        const prevNotes = latestNotesRef.current.notes;
+        inFlightSavePromiseRef.current = performSaveForWord(
+          prevId,
+          prevWordText,
+          prevTags,
+          prevNotes,
+          false
         );
       }
       pendingSavedNotesRef.current = null;
-      const initTags = userRecord?.tags || [];
-      const initNotes = userRecord?.notes || '';
-      latestNotesRef.current = { tags: initTags, notes: initNotes, dirty: false };
+      const savedDraft = unsavedDraftsByWordRef.current.get(word.id);
+      const initTags = savedDraft ? savedDraft.tags : userRecord?.tags || [];
+      const initNotes = savedDraft ? savedDraft.notes : userRecord?.notes || '';
+      const initDirty = Boolean(savedDraft);
+      latestNotesRef.current = { tags: initTags, notes: initNotes, dirty: initDirty };
       setTags(initTags);
       setNotes(initNotes);
       setNewTagInput('');
-      setNotesDirty(false);
+      setNotesDirty(initDirty);
+      setSaveError(savedDraft?.error || null);
     } else if (!prevWordRef.current) {
       pendingSavedNotesRef.current = null;
-      const initTags = userRecord?.tags || [];
-      const initNotes = userRecord?.notes || '';
-      latestNotesRef.current = { tags: initTags, notes: initNotes, dirty: false };
+      const savedDraft = unsavedDraftsByWordRef.current.get(word.id);
+      const initTags = savedDraft ? savedDraft.tags : userRecord?.tags || [];
+      const initNotes = savedDraft ? savedDraft.notes : userRecord?.notes || '';
+      const initDirty = Boolean(savedDraft);
+      latestNotesRef.current = { tags: initTags, notes: initNotes, dirty: initDirty };
       setTags(initTags);
       setNotes(initNotes);
       setNewTagInput('');
-      setNotesDirty(false);
+      setNotesDirty(initDirty);
+      setSaveError(savedDraft?.error || null);
     }
     prevWordRef.current = { id: word.id, word: word.word };
   }, [word?.id]);
@@ -121,6 +205,10 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
   // When userRecord updates for the SAME word, sync tags, and only sync notes if not dirty and not awaiting save
   useEffect(() => {
     if (!word) return;
+    const savedDraft = unsavedDraftsByWordRef.current.get(word.id);
+    if (savedDraft) {
+      return;
+    }
     const nextTags = userRecord?.tags || [];
     setTags(nextTags);
     latestNotesRef.current.tags = nextTags;
@@ -143,19 +231,17 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
   const currentStatus: LearningStatus = userRecord?.status || 'unrated';
   const enabledDicts = dictionaries.filter((d) => d.enabled);
 
-  const flushDirtyNotesIfNeeded = async () => {
+  const flushDirtyNotesIfNeeded = async (): Promise<boolean> => {
     if (latestNotesRef.current.dirty) {
       const notesToSave = latestNotesRef.current.notes;
       const tagsToSave = latestNotesRef.current.tags;
-      pendingSavedNotesRef.current = notesToSave;
-      latestNotesRef.current.dirty = false;
-      setNotesDirty(false);
-      const p = Promise.resolve(onSaveTagsAndNotes(word.id, word.word, tagsToSave, notesToSave));
+      const p = performSaveForWord(word.id, word.word, tagsToSave, notesToSave, true);
       inFlightSavePromiseRef.current = p;
-      await p;
+      return await p;
     } else if (inFlightSavePromiseRef.current) {
-      await inFlightSavePromiseRef.current;
+      return await inFlightSavePromiseRef.current;
     }
+    return true;
   };
 
   const handleCopyWord = () => {
@@ -164,53 +250,61 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
     setTimeout(() => setCopied(false), 1400);
   };
 
-  const handleAddTag = (tagToAdd: string) => {
+  const handleAddTag = async (tagToAdd: string) => {
     const clean = tagToAdd.trim().replace(/^#/, '');
     if (!clean) return;
+    setNewTagInput('');
     if (!tags.includes(clean)) {
+      const prevTags = tags;
       const next = [...tags, clean];
       setTags(next);
       latestNotesRef.current.tags = next;
-      pendingSavedNotesRef.current = latestNotesRef.current.notes;
-      latestNotesRef.current.dirty = false;
-      setNotesDirty(false);
-      inFlightSavePromiseRef.current = Promise.resolve(
-        onSaveTagsAndNotes(word.id, word.word, next, latestNotesRef.current.notes)
+      const p = performSaveForWord(
+        word.id,
+        word.word,
+        next,
+        latestNotesRef.current.notes,
+        true
       );
+      inFlightSavePromiseRef.current = p;
+      const ok = await p;
+      if (!ok) {
+        setTags(prevTags);
+        latestNotesRef.current.tags = prevTags;
+      }
     }
-    setNewTagInput('');
   };
 
-  const handleRemoveTag = (tagToRemove: string) => {
+  const handleRemoveTag = async (tagToRemove: string) => {
+    const prevTags = tags;
     const next = tags.filter((t) => t !== tagToRemove);
     setTags(next);
     latestNotesRef.current.tags = next;
-    pendingSavedNotesRef.current = latestNotesRef.current.notes;
-    latestNotesRef.current.dirty = false;
-    setNotesDirty(false);
-    inFlightSavePromiseRef.current = Promise.resolve(
-      onSaveTagsAndNotes(word.id, word.word, next, latestNotesRef.current.notes)
+    const p = performSaveForWord(
+      word.id,
+      word.word,
+      next,
+      latestNotesRef.current.notes,
+      true
     );
+    inFlightSavePromiseRef.current = p;
+    const ok = await p;
+    if (!ok) {
+      setTags(prevTags);
+      latestNotesRef.current.tags = prevTags;
+    }
   };
 
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
     if (!latestNotesRef.current.dirty) return;
     const notesToSave = latestNotesRef.current.notes;
     const tagsToSave = latestNotesRef.current.tags;
-    pendingSavedNotesRef.current = notesToSave;
-    latestNotesRef.current.dirty = false;
-    setNotesDirty(false);
-    inFlightSavePromiseRef.current = Promise.resolve(
-      onSaveTagsAndNotes(word.id, word.word, tagsToSave, notesToSave)
-    );
+    const p = performSaveForWord(word.id, word.word, tagsToSave, notesToSave, true);
+    inFlightSavePromiseRef.current = p;
+    await p;
   };
 
-  const familyPct =
-    word.formFrequency !== null &&
-    word.familyFrequency !== null &&
-    word.familyFrequency > 0
-      ? ((word.formFrequency / word.familyFrequency) * 100).toFixed(1)
-      : null;
+  const wordShareDetail = getIntraFamilyShareDetail(word.formFrequency, word.familyFrequency);
 
   const masteredFamilyMembersCount = family
     ? family.members.filter((m) => allUserRecordsMap.get(m.normalized)?.status === 'mastered')
@@ -232,6 +326,8 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
         day: '2-digit',
       })
     : null;
+
+  const isCompactDrawer = drawerWidth < 430;
 
   const inspectorBody = (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] text-[var(--text-primary)]">
@@ -411,22 +507,25 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
 
           {/* Notes */}
           <div className="space-y-1">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <label
                 htmlFor="inspector-word-notes"
                 className="text-xs font-medium text-[var(--text-secondary)]"
               >
                 助记笔记与真题搭配
               </label>
-              {notesDirty && (
-                <button
-                  type="button"
-                  onClick={handleSaveNotes}
-                  className="text-xs font-semibold text-[var(--accent-primary)] hover:underline cursor-pointer"
-                >
-                  保存笔记
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {notesDirty && (
+                  <button
+                    type="button"
+                    disabled={isSavingNotes}
+                    onClick={handleSaveNotes}
+                    className="text-xs font-semibold text-[var(--accent-primary)] hover:underline cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingNotes ? '保存中…' : saveError ? '重试保存' : '保存笔记'}
+                  </button>
+                )}
+              </div>
             </div>
             <textarea
               id="inspector-word-notes"
@@ -439,11 +538,32 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                 latestNotesRef.current.dirty = true;
                 setNotes(val);
                 setNotesDirty(true);
+                if (saveError) setSaveError(null);
               }}
               onBlur={handleSaveNotes}
               placeholder="记录真题例句、搭配或易混辨析…"
-              className="w-full p-2 text-xs rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] focus-ring resize-y"
+              className={`w-full p-2 text-xs rounded-md border bg-[var(--bg-canvas)] text-[var(--text-primary)] focus-ring resize-y ${
+                saveError ? 'border-rose-500/60' : 'border-[var(--border-subtle)]'
+              }`}
             />
+            {saveError && (
+              <div
+                role="alert"
+                className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-700 dark:text-rose-300"
+              >
+                <span className="inline-flex items-center gap-1 min-w-0 truncate">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{saveError}（未保存草稿已保留）</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveNotes}
+                  className="font-semibold underline shrink-0 cursor-pointer"
+                >
+                  重试
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Static Collections Quick Toggle */}
@@ -524,9 +644,9 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
               <span className="font-semibold text-[var(--text-primary)]">
                 {word.familyFrequency !== null ? word.familyFrequency.toLocaleString() : '—'}
               </span>
-              {familyPct !== null && (
+              {wordShareDetail.exactPct !== null && (
                 <span className="text-[11px] text-[var(--accent-primary)]">
-                  (占族 {familyPct}%)
+                  (占族 {wordShareDetail.label})
                 </span>
               )}
             </div>
@@ -559,11 +679,11 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
             </div>
           )}
 
-          {/* BNC/COCA Family Member Spectrum */}
+          {/* BNC/COCA Family Member Spectrum — Container-Width Adaptive Layout */}
           {family && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-medium text-[var(--text-secondary)]">
+                <div className="text-xs font-medium text-[var(--text-secondary)] min-w-0 truncate">
                   词族{' '}
                   <strong translate="no" className="font-serif-lexicon text-[var(--text-primary)]">
                     {family.headword}
@@ -582,10 +702,10 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
 
               <div className="rounded-lg border border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)] overflow-hidden">
                 {family.members.map((member) => {
-                  const pct =
-                    family.totalFrequency > 0
-                      ? Math.round((member.frequency / family.totalFrequency) * 100)
-                      : 0;
+                  const shareDetail = getIntraFamilyShareDetail(
+                    member.frequency,
+                    family.totalFrequency
+                  );
                   const isCurrent = member.normalized === word.id;
                   const memberRec = allUserRecordsMap.get(member.normalized);
                   const memberStatus = memberRec?.status || 'unrated';
@@ -596,47 +716,68 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                       key={member.normalized}
                       type="button"
                       onClick={() => onSelectWordById(member.normalized)}
-                      className={`w-full px-2.5 sm:px-3 py-1.5 text-left grid grid-cols-[minmax(84px,1fr)_48px_58px_44px] sm:grid-cols-[minmax(96px,1fr)_56px_72px_52px] items-center gap-1.5 text-xs transition-colors cursor-pointer ${
+                      className={`w-full px-3 py-2 text-left transition-colors cursor-pointer block space-y-1 ${
                         isCurrent
                           ? 'bg-[var(--accent-soft)] font-semibold'
                           : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)]'
                       }`}
                     >
-                      <div className="min-w-0 flex items-center gap-1">
-                        <span
-                          translate="no"
-                          className="font-serif-lexicon text-[var(--text-primary)] truncate"
-                        >
-                          {member.word}
-                        </span>
-                        {member.isHeadword && (
-                          <span className="text-[10px] text-[var(--accent-primary)] shrink-0">
-                            首
+                      {/* Row 1: Member word + role tags on left; exact frequency + share % + independent status badge on right */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span
+                            translate="no"
+                            className="font-serif-lexicon text-xs text-[var(--text-primary)] truncate"
+                          >
+                            {member.word}
                           </span>
-                        )}
-                      </div>
+                          {member.isHeadword && (
+                            <span className="text-[10px] font-mono-tabular px-1 py-0.2 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] shrink-0">
+                              {isCompactDrawer ? '首' : '首词'}
+                            </span>
+                          )}
+                          {member.frequency === 0 && (
+                            <span className="text-[10px] font-mono-tabular text-amber-700 dark:text-amber-300 shrink-0">
+                              0频
+                            </span>
+                          )}
+                        </div>
 
-                      <div className="flex items-center gap-1">
-                        <div className="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-[var(--accent-primary)] rounded-full"
-                            style={{ width: `${Math.max(pct, member.frequency > 0 ? 4 : 0)}%` }}
-                          />
+                        <div className="flex items-center gap-1.5 shrink-0 font-mono-tabular text-[11px]">
+                          <span
+                            className="text-[var(--text-secondary)]"
+                            title="该词形在语料库中的实测频次"
+                          >
+                            {member.frequency.toLocaleString()}
+                          </span>
+                          <span
+                            className="text-[var(--text-muted)] w-8 text-right"
+                            title="族内词形频次占比"
+                          >
+                            {shareDetail.label}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-sans font-medium shrink-0 ${
+                              memberStatus !== 'unrated'
+                                ? 'bg-[var(--bg-subtle)] text-[var(--text-primary)]'
+                                : 'text-[var(--text-muted)]'
+                            }`}
+                          >
+                            {memberStatusMeta.shortLabel}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="text-right font-mono-tabular text-[11px] text-[var(--text-secondary)]">
-                        {member.frequency.toLocaleString()}
-                      </div>
-
-                      <div className="text-right font-mono-tabular text-[11px]">
-                        {memberStatus !== 'unrated' ? (
-                          <span className="text-[var(--text-primary)]">
-                            {memberStatusMeta.shortLabel}
-                          </span>
-                        ) : (
-                          <span className="text-[var(--text-muted)]">{pct}%</span>
-                        )}
+                      {/* Row 2: Faithful Intra-Family Share Bar (0% for zero freq, 2px hairline for <1% non-zero, true % otherwise) */}
+                      <div className="h-1 w-full bg-[var(--bg-subtle)] rounded-full overflow-hidden">
+                        <div
+                          className={`h-full bg-[var(--accent-primary)] rounded-full ${
+                            shareDetail.isUltraLowNonZero ? 'min-w-[2px]' : ''
+                          }`}
+                          style={{
+                            width: `${shareDetail.exactPct !== null ? shareDetail.exactPct : 0}%`,
+                          }}
+                        />
                       </div>
                     </button>
                   );
@@ -773,6 +914,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
         }}
       >
         <aside
+          ref={drawerRef}
           aria-label="词条详情"
           onClick={(e) => e.stopPropagation()}
           className="w-full max-h-[86dvh] md:max-h-none md:h-full md:w-[380px] xl:w-full rounded-t-2xl md:rounded-none overflow-hidden border-t md:border-t-0 md:border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl xl:shadow-none grid grid-rows-[auto_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] select-text"
@@ -795,6 +937,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
       }}
     >
       <aside
+        ref={drawerRef}
         role="dialog"
         aria-modal="true"
         aria-label="词条详情"

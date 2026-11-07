@@ -617,13 +617,80 @@ export function searchLexicon(
 }
 
 /**
- * Parse a single CSV or TSV line following RFC 4180 quote and escaped-quote rules.
+ * Splits a multi-line CSV/TSV text into logical records following RFC 4180 quote rules.
+ * Newlines inside double-quoted fields are preserved as part of the field rather than splitting the row.
+ */
+export function splitCsvRecords(rawText: string): string[] {
+  const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const records: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let atFieldStart = true;
+
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+
+    if (inQuotes) {
+      current += ch;
+      if (ch === '"') {
+        if (i + 1 < normalized.length && normalized[i + 1] === '"') {
+          current += normalized[i + 1];
+          i++;
+        } else {
+          inQuotes = false;
+          atFieldStart = false;
+        }
+      }
+    } else {
+      if (ch === '"' && atFieldStart) {
+        inQuotes = true;
+        atFieldStart = false;
+        current += ch;
+      } else if (ch === '\n') {
+        records.push(current);
+        current = '';
+        atFieldStart = true;
+      } else if (ch === ',' || ch === '\t') {
+        current += ch;
+        atFieldStart = true;
+      } else {
+        if (ch !== ' ') {
+          atFieldStart = false;
+        }
+        current += ch;
+      }
+    }
+  }
+
+  if (current.length > 0) {
+    records.push(current);
+  }
+  return records;
+}
+
+/**
+ * Parse a single CSV or TSV record (which may contain embedded newlines inside quotes)
+ * following RFC 4180 quote and escaped-quote rules.
  * Supports:
- * - Tab-delimited lines (TSV)
- * - Comma-delimited lines with double-quoted fields, commas inside quotes ("核心词,高频"),
+ * - Tab-delimited records (TSV)
+ * - Comma-delimited records with double-quoted fields, commas/newlines inside quotes,
  *   and escaped double-quotes ("" -> ").
  */
-export function parseCsvLine(line: string, delimiter: ',' | '\t' = ','): string[] {
+export function parseCsvLine(line: string, delimiter?: ',' | '\t'): string[] {
+  // Auto-detect delimiter outside quotes if not explicitly passed
+  let effectiveDelimiter: ',' | '\t' = delimiter || ',';
+  if (!delimiter) {
+    let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') q = !q;
+      else if (!q && c === '\t') {
+        effectiveDelimiter = '\t';
+        break;
+      }
+    }
+  }
+
   const fields: string[] = [];
   let current = '';
   let inQuotes = false;
@@ -654,7 +721,7 @@ export function parseCsvLine(line: string, delimiter: ',' | '\t' = ','): string[
         current = '';
         i++;
         continue;
-      } else if (ch === delimiter) {
+      } else if (ch === effectiveDelimiter) {
         fields.push(current.trim());
         current = '';
         i++;
@@ -720,7 +787,7 @@ export interface BatchParsedRow {
 }
 
 /**
- * Parses multi-line batch input text (single-column, TSV, or RFC 4180 CSV)
+ * Parses multi-line batch input text (single-column, TSV, or RFC 4180 CSV including multiline quoted fields)
  * and resolves each row against the lexicon.
  */
 export function parseBatchInputText(
@@ -728,22 +795,34 @@ export function parseBatchInputText(
   wordsMap: Map<string, LexiconWordItem>,
   allWords: LexiconWordItem[]
 ): BatchParsedRow[] {
-  const lines = rawText.replace(/\r\n/g, '\n').split('\n');
+  const records = splitCsvRecords(rawText);
   const rows: BatchParsedRow[] = [];
   const seenIds = new Set<string>();
 
-  for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i].trim();
+  for (let i = 0; i < records.length; i++) {
+    const rawLine = records[i].trim();
     if (!rawLine || rawLine.startsWith('#')) continue;
 
-    // Detect delimiter: prefer Tab if present, otherwise Comma if present
+    // Detect delimiter outside quotes: prefer Tab if present outside quotes, otherwise Comma if present outside quotes
+    let hasTabOutsideQuotes = false;
+    let hasCommaOutsideQuotes = false;
+    let q = false;
+    for (let k = 0; k < rawLine.length; k++) {
+      const ch = rawLine[k];
+      if (ch === '"') q = !q;
+      else if (!q) {
+        if (ch === '\t') hasTabOutsideQuotes = true;
+        else if (ch === ',') hasCommaOutsideQuotes = true;
+      }
+    }
+
     let cols: string[];
-    if (rawLine.includes('\t')) {
+    if (hasTabOutsideQuotes) {
       cols = parseCsvLine(rawLine, '\t');
-    } else if (rawLine.includes(',')) {
+    } else if (hasCommaOutsideQuotes) {
       cols = parseCsvLine(rawLine, ',');
     } else {
-      cols = [rawLine];
+      cols = parseCsvLine(rawLine, ',');
     }
 
     const firstCol = (cols[0] || '').replace(/^["']|["']$/g, '').trim();
@@ -768,40 +847,50 @@ export function parseBatchInputText(
     let parsedTags: string[] = [];
     let parsedNote: string | undefined;
 
-    if (cols[1]) {
-      const sCandidate = STATUS_TOKEN_MAP[cols[1].trim().toLowerCase()] || STATUS_TOKEN_MAP[cols[1].trim()];
-      if (sCandidate) {
-        parsedStatus = sCandidate;
-      } else {
-        parsedTags.push(
-          ...cols[1]
-            .split(/[,，;；|/]+/)
-            .map((t) => t.trim().replace(/^#/, ''))
-            .filter(Boolean)
-        );
-      }
-    }
+    // 1. Check if this is the 9-column exported CSV format:
+    // Word,CET_Levels,BNC_Band,Headword,Form_Frequency,Family_Frequency,Learning_Status,Tags,Notes
+    const col6Status =
+      cols.length >= 7
+        ? STATUS_TOKEN_MAP[(cols[6] || '').trim().toLowerCase()] ||
+          STATUS_TOKEN_MAP[(cols[6] || '').trim()]
+        : undefined;
 
-    if (cols[2]) {
-      // Support both exported CSV columns (Word,CET_Levels,BNC_Band,Headword,Form_Frequency,Family_Frequency,Learning_Status,Tags,Notes)
-      // and standard 4-column batch format (Word, Status, Tags, Notes)
-      if (cols.length >= 8 && STATUS_TOKEN_MAP[cols[6]?.trim().toLowerCase()]) {
-        parsedStatus = STATUS_TOKEN_MAP[cols[6].trim().toLowerCase()];
-        parsedTags = (cols[7] || '')
-          .split(/[,，;；|/]+/)
-          .map((t) => t.trim().replace(/^#/, ''))
-          .filter(Boolean);
-        parsedNote = cols[8]?.trim() || undefined;
-      } else {
+    if (cols.length >= 7 && col6Status) {
+      parsedStatus = col6Status;
+      parsedTags = (cols[7] || '')
+        .split(/[,，;；|/]+/)
+        .map((t) => t.trim().replace(/^#/, ''))
+        .filter(Boolean);
+      parsedNote = cols[8]?.trim() || undefined;
+    } else {
+      // 2. Standard 2-to-4 column batch format: Word, Status/Tags, Tags, Notes
+      if (cols[1]) {
+        const sCandidate =
+          STATUS_TOKEN_MAP[cols[1].trim().toLowerCase()] || STATUS_TOKEN_MAP[cols[1].trim()];
+        if (sCandidate) {
+          parsedStatus = sCandidate;
+        } else {
+          parsedTags.push(
+            ...cols[1]
+              .split(/[,，;；|/]+/)
+              .map((t) => t.trim().replace(/^#/, ''))
+              .filter(Boolean)
+          );
+        }
+      }
+
+      if (cols[2]) {
         parsedTags.push(
           ...cols[2]
             .split(/[,，;；|/]+/)
             .map((t) => t.trim().replace(/^#/, ''))
             .filter(Boolean)
         );
-        if (cols[3]) {
-          parsedNote = cols.slice(3).join(', ').trim() || undefined;
-        }
+      }
+
+      if (cols.length >= 4 && cols[3] !== undefined) {
+        const rawNote = cols.slice(3).join(', ').trim();
+        if (rawNote) parsedNote = rawNote;
       }
     }
 
@@ -867,6 +956,28 @@ export function parseBatchInputText(
   }
 
   return rows;
+}
+
+/**
+ * Selects CET-4/CET-6 word IDs inside a BNC/COCA family for the "大纲词标为待学" action.
+ * By default (`overwriteExisting = false`), ONLY selects members whose status is currently `'unrated'`,
+ * protecting already mastered, learning, or deferred words from being overwritten.
+ */
+export function selectFamilyCetWordIdsForQueue(
+  family: BncCocaFamily,
+  wordsMap: Map<string, LexiconWordItem>,
+  userRecordsMap: Map<string, UserWordRecord>,
+  overwriteExisting = false
+): string[] {
+  return family.members
+    .filter((m) => {
+      const entry = wordsMap.get(m.normalized);
+      if (!entry || (!entry.isCet4 && !entry.isCet6)) return false;
+      if (overwriteExisting) return true;
+      const currentStatus = userRecordsMap.get(m.normalized)?.status || 'unrated';
+      return currentStatus === 'unrated';
+    })
+    .map((m) => m.normalized);
 }
 
 export interface BandCoverageRow {

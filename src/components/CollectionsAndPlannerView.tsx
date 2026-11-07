@@ -109,9 +109,9 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
       window.addEventListener('resize', updateWidth);
       return () => window.removeEventListener('resize', updateWidth);
     }
-  }, []);
+  }, [mobilePane, centerMode]);
 
-  const isCompactCenter = centerWidth < 560;
+  const isCompactCenter = centerWidth < 580;
 
   const activeCollection = useMemo(() => {
     return collections.find((c) => c.id === selectedCollectionId) || collections[0] || null;
@@ -549,57 +549,102 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
               </button>
             </div>
 
-            <div
-              className={`${plannerGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
-            >
-              <div>序号</div>
-              <div>候选词条</div>
-              <div>大纲</div>
-              <div>词族与频段</div>
-              {!isCompactCenter && <div>推荐理由</div>}
-              <div className="text-right">权重分</div>
-            </div>
+            {isCompactCenter ? (
+              <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <span>候选词条 · 大纲与词族 · 推荐理由</span>
+                <span>辅助权重</span>
+              </div>
+            ) : (
+              <div
+                className={`${plannerGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
+              >
+                <div>序号</div>
+                <div>候选词条</div>
+                <div>大纲</div>
+                <div>词族与频段</div>
+                <div>推荐理由</div>
+                <div className="text-right">辅助权重</div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
-              {plannerCandidates.map(({ entry, score, reason }, idx) => (
-                <div
-                  key={entry.id}
-                  onClick={() => onSelectWord(entry)}
-                  className={`${plannerGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs`}
-                >
-                  <div className="font-mono-tabular text-[var(--text-muted)]">{idx + 1}.</div>
+              {plannerCandidates.map(({ entry, score, reason }, idx) =>
+                isCompactCenter ? (
                   <div
-                    translate="no"
-                    className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
+                    key={entry.id}
+                    onClick={() => onSelectWord(entry)}
+                    className="px-3.5 py-2.5 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors space-y-1 text-xs"
                   >
-                    {entry.word}
-                  </div>
-                  <div className="font-mono-tabular whitespace-nowrap">
-                    {entry.isCet4 ? (
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                        CET-4
+                    <div className="flex items-baseline justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex items-baseline gap-1.5">
+                        <span className="font-mono-tabular text-[11px] text-[var(--text-muted)] shrink-0">
+                          {idx + 1}.
+                        </span>
+                        <span
+                          translate="no"
+                          className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
+                        >
+                          {entry.word}
+                        </span>
+                        {entry.isCet4 ? (
+                          <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">
+                            CET-4
+                          </span>
+                        ) : entry.isCet6 ? (
+                          <span className="text-[11px] font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
+                            CET-6
+                          </span>
+                        ) : null}
+                        <span className="text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
+                          {entry.band ? `${entry.band} · ${entry.headword}` : ''}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] shrink-0">
+                        权重 {score}
                       </span>
-                    ) : entry.isCet6 ? (
-                      <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
-                        CET-6
-                      </span>
-                    ) : (
-                      <span className="text-[var(--text-muted)]">—</span>
-                    )}
-                  </div>
-                  <div className="font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
-                    {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
-                  </div>
-                  {!isCompactCenter && (
-                    <div className="text-[11px] text-[var(--text-muted)] truncate pr-2">
+                    </div>
+                    <div className="pl-5 text-[11px] text-[var(--text-secondary)] truncate">
                       {reason}
                     </div>
-                  )}
-                  <div className="text-right font-mono-tabular font-semibold text-[var(--accent-primary)]">
-                    {score}
                   </div>
-                </div>
-              ))}
+                ) : (
+                  <div
+                    key={entry.id}
+                    onClick={() => onSelectWord(entry)}
+                    className={`${plannerGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs`}
+                  >
+                    <div className="font-mono-tabular text-[var(--text-muted)]">{idx + 1}.</div>
+                    <div
+                      translate="no"
+                      className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
+                    >
+                      {entry.word}
+                    </div>
+                    <div className="font-mono-tabular whitespace-nowrap">
+                      {entry.isCet4 ? (
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                          CET-4
+                        </span>
+                      ) : entry.isCet6 ? (
+                        <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
+                          CET-6
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </div>
+                    <div className="font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
+                      {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
+                    </div>
+                    <div className="text-[11px] text-[var(--text-secondary)] truncate pr-2">
+                      {reason}
+                    </div>
+                    <div className="text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                      {score}
+                    </div>
+                  </div>
+                )
+              )}
             </div>
           </>
         ) : activeCollection ? (
@@ -845,7 +890,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
               <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
               下一批学习规划器
             </h3>
-            <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">多维加权排序</span>
+            <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">大纲与词族优先</span>
           </div>
 
           {plannerFormControls}
@@ -853,35 +898,51 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
         {/* Candidate Preview List */}
         <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-          <span>候选实词优先级预览 (Top {Math.min(plannerCandidates.length, 30)})</span>
-          <span>综合权重分</span>
+          <span>候选实词预览 (Top {Math.min(plannerCandidates.length, 30)})</span>
+          <span>选词依据 · 辅助权重</span>
         </div>
 
         <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-          {plannerCandidates.slice(0, 30).map(({ entry, score }, idx) => (
+          {plannerCandidates.slice(0, 30).map(({ entry, score, reason }, idx) => (
             <div
               key={entry.id}
               onClick={() => onSelectWord(entry)}
-              className="px-4 py-2 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center justify-between gap-2 transition-colors"
+              className="px-4 py-2 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] cursor-pointer space-y-0.5 transition-colors"
             >
-              <div className="min-w-0 flex items-baseline gap-2">
-                <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-5">
-                  {idx + 1}.
-                </span>
+              <div className="flex items-baseline justify-between gap-2 min-w-0">
+                <div className="min-w-0 flex items-baseline gap-1.5">
+                  <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-5 shrink-0">
+                    {idx + 1}.
+                  </span>
+                  <span
+                    translate="no"
+                    className="font-serif-lexicon font-semibold text-xs text-[var(--text-primary)] truncate"
+                  >
+                    {entry.word}
+                  </span>
+                  {entry.isCet4 ? (
+                    <span className="text-[10px] font-mono-tabular text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">
+                      CET-4
+                    </span>
+                  ) : entry.isCet6 ? (
+                    <span className="text-[10px] font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
+                      CET-6
+                    </span>
+                  ) : null}
+                  <span className="text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
+                    {entry.band
+                      ? `${entry.band}${!entry.isHeadword && entry.headword ? ` · ←${entry.headword}` : ''}`
+                      : '—'}
+                  </span>
+                </div>
                 <span
-                  translate="no"
-                  className="font-serif-lexicon font-semibold text-xs text-[var(--text-primary)] truncate"
+                  className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0"
+                  title="仅用于内部排序的综合参考权重"
                 >
-                  {entry.word}
-                </span>
-                <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] shrink-0">
-                  {entry.band || '—'}
-                  {entry.isCet4 ? ' · CET4' : entry.isCet6 ? ' · CET6' : ''}
+                  权重 {score}
                 </span>
               </div>
-              <span className="text-xs font-mono-tabular font-semibold text-[var(--accent-primary)] shrink-0">
-                {score}
-              </span>
+              <div className="pl-5 text-[11px] text-[var(--text-muted)] truncate">{reason}</div>
             </div>
           ))}
         </div>

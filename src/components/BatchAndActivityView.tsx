@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -87,6 +87,28 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
   const [logSearch, setLogSearch] = useState('');
   const [logTypeFilter, setLogTypeFilter] = useState<string>('all');
   const [logPage, setLogPage] = useState(0);
+
+  const rightPaneRef = useRef<HTMLDivElement>(null);
+  const [rightWidth, setRightWidth] = useState<number>(760);
+
+  useEffect(() => {
+    const el = rightPaneRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0) setRightWidth(el.clientWidth);
+    };
+    updateWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateWidth);
+      ro.observe(el);
+      return () => ro.disconnect();
+    } else {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+  }, [mobilePane, rightTab]);
+
+  const isCompactRight = rightWidth < 560;
 
   const parsedRows = useMemo(() => {
     return parseBatchInputText(rawInput, wordsMap, words);
@@ -397,6 +419,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
 
       {/* Zone 2: Right Structured Disambiguation Table & Activity Ledger */}
       <div
+        ref={rightPaneRef}
         className={`flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
           mobilePane !== 'input' ? 'flex' : 'hidden lg:flex'
         }`}
@@ -515,14 +538,20 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
         {/* Tab Content */}
         {rightTab === 'preview' ? (
           <>
-            {/* 5-Column Preview Table Header */}
-            <div className="grid grid-cols-[24px_minmax(68px,1fr)_minmax(96px,1.3fr)_66px_64px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-              <div>纳入</div>
-              <div>输入原词</div>
-              <div>匹配词条与消歧</div>
-              <div>匹配诊断</div>
-              <div className="text-right">目标状态</div>
-            </div>
+            {isCompactRight ? (
+              <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <span>纳入 · 输入原词 → 匹配词条</span>
+                <span>诊断 · 目标状态</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <div>纳入</div>
+                <div>输入原词</div>
+                <div>匹配词条与消歧</div>
+                <div>匹配诊断</div>
+                <div className="text-right">目标状态</div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
               {parsedRows.length === 0 ? (
@@ -541,10 +570,98 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                     : 'unrated';
                   const finalStatus = row.parsedStatus || defaultStatus;
 
+                  if (isCompactRight) {
+                    return (
+                      <div
+                        key={idx}
+                        className={`px-3.5 py-2.5 text-xs transition-colors space-y-1 ${
+                          isExcluded
+                            ? 'opacity-45 bg-[var(--bg-canvas)]'
+                            : 'hover:bg-[var(--bg-hover)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={!isExcluded && Boolean(targetWord)}
+                              disabled={!targetWord || row.isDuplicateInBatch}
+                              onChange={() => handleToggleExclude(idx)}
+                              aria-label={`纳入 ${row.cleanedTerm}`}
+                              className="rounded border-[var(--border-strong)] shrink-0"
+                            />
+                            <span className="font-mono-tabular text-[var(--text-secondary)] truncate">
+                              {row.cleanedTerm}
+                            </span>
+                            <span className="text-[var(--text-muted)] shrink-0">→</span>
+                            {targetWord ? (
+                              <button
+                                type="button"
+                                translate="no"
+                                onClick={() => onSelectWord(targetWord)}
+                                className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] hover:text-[var(--accent-primary)] truncate cursor-pointer"
+                              >
+                                {targetWord.word}
+                              </button>
+                            ) : (
+                              <span className="text-[var(--text-muted)] truncate">未收录</span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 font-mono-tabular text-[11px]">
+                            {targetWord ? (
+                              <span className="text-[var(--text-secondary)]">
+                                {LEARNING_STATUS_META[currentStatus].shortLabel} →{' '}
+                                <strong className="text-[var(--text-primary)]">
+                                  {LEARNING_STATUS_META[finalStatus].shortLabel}
+                                </strong>
+                              </span>
+                            ) : (
+                              <span className="text-rose-600 dark:text-rose-400">未匹配</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {(row.candidateWords.length > 1 ||
+                          row.parsedTags.length > 0 ||
+                          row.parsedNote) && (
+                          <div className="pl-6 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                            {row.candidateWords.length > 1 && targetWord && (
+                              <select
+                                value={targetWord.id}
+                                onChange={(e) =>
+                                  setSelectedCandidateMap((prev) => ({
+                                    ...prev,
+                                    [idx]: e.target.value,
+                                  }))
+                                }
+                                className="px-1.5 py-0.5 text-[11px] bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded"
+                              >
+                                {row.candidateWords.map((cand) => (
+                                  <option key={cand.id} value={cand.id}>
+                                    {cand.word}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {row.parsedTags.length > 0 && (
+                              <span className="font-mono-tabular text-[var(--accent-primary)]">
+                                #{row.parsedTags.join(' #')}
+                              </span>
+                            )}
+                            {row.parsedNote && (
+                              <span className="truncate max-w-[220px]">{row.parsedNote}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={idx}
-                      className={`grid grid-cols-[24px_minmax(68px,1fr)_minmax(96px,1.3fr)_66px_64px] sm:grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 py-2.5 text-xs transition-colors ${
+                      className={`grid grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 py-2.5 text-xs transition-colors ${
                         isExcluded ? 'opacity-45 bg-[var(--bg-canvas)]' : 'hover:bg-[var(--bg-hover)]'
                       }`}
                     >
@@ -650,13 +767,20 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
         ) : (
           <>
             {/* Activity Ledger Table Header */}
-            <div className="grid grid-cols-[78px_1fr_84px_48px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-              <div>时间</div>
-              <div>词条</div>
-              <div>变更内容</div>
-              <div className="hidden sm:block">来源批次</div>
-              <div className="text-right">操作</div>
-            </div>
+            {isCompactRight ? (
+              <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <span>词条 · 变更内容 · 时间</span>
+                <span>撤销操作</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <div>时间</div>
+                <div>词条</div>
+                <div>变更内容</div>
+                <div>来源批次</div>
+                <div className="text-right">操作</div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
               {pagedLogs.length === 0 ? (
@@ -666,10 +790,80 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
               ) : (
                 pagedLogs.map((log) => {
                   const wordObj = wordsMap.get(log.wordId);
+                  const changeDesc =
+                    log.actionType === 'status_change' || log.actionType === 'batch_import' ? (
+                      <span>
+                        {LEARNING_STATUS_META[log.previousStatus || 'unrated'].shortLabel} →{' '}
+                        <strong className="text-[var(--text-primary)]">
+                          {LEARNING_STATUS_META[log.newStatus || 'unrated'].shortLabel}
+                        </strong>
+                      </span>
+                    ) : log.actionType === 'tags_change' ? (
+                      <span>标签更新</span>
+                    ) : log.actionType === 'study_touch' ? (
+                      <span className="text-emerald-700 dark:text-emerald-400">复习打卡</span>
+                    ) : (
+                      <span>笔记更新</span>
+                    );
+
+                  if (isCompactRight) {
+                    return (
+                      <div
+                        key={log.id}
+                        className="px-3.5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-baseline gap-2 min-w-0">
+                            <button
+                              type="button"
+                              translate="no"
+                              onClick={() => {
+                                if (wordObj) onSelectWord(wordObj);
+                              }}
+                              className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] hover:text-[var(--accent-primary)] cursor-pointer truncate"
+                            >
+                              {log.word}
+                            </button>
+                            <span className="text-[11px] text-[var(--text-secondary)] shrink-0">
+                              {changeDesc}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-mono-tabular text-[var(--text-muted)] truncate">
+                            {new Date(log.timestamp).toLocaleString('zh-CN', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}{' '}
+                            · {log.sourceLabel || '手动标注'}
+                          </div>
+                        </div>
+
+                        {log.id !== undefined && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                setActionError(null);
+                                await onUndoSingleLog(log.id!);
+                              } catch (err) {
+                                setActionError(err instanceof Error ? err.message : '撤销失败');
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] whitespace-nowrap shrink-0 cursor-pointer"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            撤销
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={log.id}
-                      className="grid grid-cols-[78px_1fr_84px_48px] sm:grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
+                      className="grid grid-cols-[108px_minmax(100px,1.2fr)_120px_minmax(100px,1fr)_68px] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] transition-colors"
                     >
                       <div className="font-mono-tabular text-[11px] text-[var(--text-muted)] whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString('zh-CN', {
@@ -694,23 +888,10 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                       </div>
 
                       <div className="text-[11px] text-[var(--text-secondary)] whitespace-nowrap">
-                        {log.actionType === 'status_change' || log.actionType === 'batch_import' ? (
-                          <span>
-                            {LEARNING_STATUS_META[log.previousStatus || 'unrated'].shortLabel} →{' '}
-                            <strong className="text-[var(--text-primary)]">
-                              {LEARNING_STATUS_META[log.newStatus || 'unrated'].shortLabel}
-                            </strong>
-                          </span>
-                        ) : log.actionType === 'tags_change' ? (
-                          <span>标签更新</span>
-                        ) : log.actionType === 'study_touch' ? (
-                          <span className="text-emerald-700 dark:text-emerald-400">复习打卡</span>
-                        ) : (
-                          <span>笔记更新</span>
-                        )}
+                        {changeDesc}
                       </div>
 
-                      <div className="hidden sm:block text-[11px] text-[var(--text-muted)] truncate pr-2">
+                      <div className="text-[11px] text-[var(--text-muted)] truncate pr-2">
                         {log.sourceLabel || '手动标注'}
                       </div>
 

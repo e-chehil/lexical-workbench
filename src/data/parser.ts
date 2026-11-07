@@ -878,3 +878,48 @@ export function buildLexiconDatabase(
   };
 }
 
+/**
+ * Validates a custom dataset file's basic structure and parses it before saving to IndexedDB.
+ * Throws a clear, human-readable Error if the file is empty, malformed, or of the wrong dataset type.
+ */
+export function validateCustomDatasetContent(
+  type: 'cet2016' | 'bnc_coca',
+  content: string
+): { entriesCount: number } {
+  const trimmed = (content || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) {
+    throw new Error('上传的词表文件为空，请检查文件内容');
+  }
+
+  // Reject obvious HTML/JSON/binary uploads
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('{')) {
+    throw new Error('上传的文件格式无效（检测到 HTML 或 JSON 内容，而非纯文本词表）');
+  }
+
+  if (type === 'bnc_coca') {
+    const parsedBnc = parseBncCoca(content);
+    if (parsedBnc.families.length === 0) {
+      throw new Error(
+        '未能从文件中解析出任何有效的 BNC/COCA 词族记录（需包含如 "1k\\table\\t..." 的 Tab 分隔行）'
+      );
+    }
+    return { entriesCount: parsedBnc.families.length };
+  }
+
+  // type === 'cet2016'
+  const firstLine = trimmed.split(/\r?\n/)[0] || '';
+  if (/^list\s*\t\s*headword/i.test(firstLine) || /^\d+k\t/i.test(firstLine)) {
+    throw new Error('检测到 BNC/COCA 词族表格式，请勿将其上传至 CET2016 大纲词表槽位');
+  }
+
+  const parsedCet = parseCet2016(content);
+  if (parsedCet.entries.length === 0) {
+    throw new Error('未能从文件中解析出任何有效的 CET 大纲词目行');
+  }
+  const validAlphaEntries = parsedCet.entries.filter((e) => /[a-zA-Z]/.test(e.headwordDisplay));
+  if (validAlphaEntries.length === 0) {
+    throw new Error('上传的 CET 词表未包含有效的英文词条');
+  }
+
+  return { entriesCount: parsedCet.entries.length };
+}

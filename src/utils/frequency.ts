@@ -51,8 +51,57 @@ export function getIntraFamilySharePct(
 }
 
 /**
+ * Computes detailed intra-family share metrics for faithful bar rendering and labels.
+ * Strictly distinguishes:
+ * - null (unranked / variant-linked with no independent frequency)
+ * - 0 (explicit zero frequency in BNC/COCA -> 0% width, "0%" label)
+ * - 0 < pct < 1 (ultra-low non-zero frequency -> exact width with 2px minimum hairline, "<1%" label)
+ * - pct >= 1 (faithful proportional width, rounded integer "%" label)
+ */
+export function getIntraFamilyShareDetail(
+  formFrequency: number | null,
+  familyFrequency: number | null,
+  inBnc?: boolean,
+  bncLinkedViaVariant?: boolean
+): {
+  pct: number | null;
+  exactPct: number;
+  label: string;
+  isUltraLowNonZero: boolean;
+} {
+  if (
+    bncLinkedViaVariant ||
+    inBnc === false ||
+    formFrequency === null ||
+    familyFrequency === null ||
+    familyFrequency <= 0
+  ) {
+    return { pct: null, exactPct: 0, label: '—', isUltraLowNonZero: false };
+  }
+  if (formFrequency <= 0) {
+    return { pct: 0, exactPct: 0, label: '0%', isUltraLowNonZero: false };
+  }
+  const exactPct = Math.min(100, Math.max(0, (formFrequency / familyFrequency) * 100));
+  if (exactPct > 0 && exactPct < 1) {
+    return {
+      pct: 1,
+      exactPct,
+      label: '<1%',
+      isUltraLowNonZero: true,
+    };
+  }
+  const rounded = Math.min(100, Math.round(exactPct));
+  return {
+    pct: rounded,
+    exactPct,
+    label: `${rounded}%`,
+    isUltraLowNonZero: false,
+  };
+}
+
+/**
  * Formats a concise role + intra-family share summary for list views,
- * e.g. "词头 · 占族 63%" or "派生 · 占族 19%" or "变体关联 · 族3词".
+ * e.g. "词头 · 占族 63%" or "派生 · 占族 <1%" or "关联词族 · 族3词".
  */
 export function formatFamilyRoleAndShare(
   isHeadword: boolean,
@@ -69,14 +118,14 @@ export function formatFamilyRoleAndShare(
     return `关联词族 · 族${familyMemberCount ?? 1}词`;
   }
   const roleLabel = isHeadword ? '词头' : '派生';
-  const sharePct = getIntraFamilySharePct(
+  const shareDetail = getIntraFamilyShareDetail(
     formFrequency,
     familyFrequency,
     inBnc,
     bncLinkedViaVariant
   );
-  if (sharePct !== null && (familyMemberCount ?? 1) > 1) {
-    return `${roleLabel} · 占族 ${sharePct}%`;
+  if (shareDetail.pct !== null && (familyMemberCount ?? 1) > 1) {
+    return `${roleLabel} · 占族 ${shareDetail.label}`;
   }
   return `${roleLabel} · 族${familyMemberCount ?? 1}词`;
 }

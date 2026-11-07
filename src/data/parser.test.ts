@@ -7,6 +7,7 @@ import {
   expandCetMemberToken,
   parseBncCoca,
   parseCet2016,
+  validateCustomDatasetContent,
 } from './parser.ts';
 import {
   buildDictionaryUrl,
@@ -18,8 +19,19 @@ import {
   parseBatchInputText,
   parseCsvLine,
   searchLexicon,
+  selectFamilyCetWordIdsForQueue,
+  splitCsvRecords,
 } from './searchAndFilter.ts';
-import { UserWordRecord } from './types.ts';
+import {
+  applyLogUndoToRecord,
+  mergeUserWordRecordPair,
+  mergeWordCollectionPair,
+} from '../db/database.ts';
+import {
+  formatFamilyRoleAndShare,
+  getIntraFamilyShareDetail,
+} from '../utils/frequency.ts';
+import { ActivityLogEntry, UserWordRecord, WordCollection } from './types.ts';
 
 test('CET2016 token expansion handles all required edge cases accurately', () => {
   // 1. a/an parallel slash
@@ -337,3 +349,324 @@ test('Full real dataset integration test (CET2016.txt + BNC_COCA_lists.txt)', ()
   const grannies = byId.get('grannies')!;
   assert.equal(grannies.bncMemberships?.length, 2);
 });
+
+test('Undo & batch rollback restore studyCount, lastStudiedAt, and simultaneous tags + notes accurately', () => {
+  const currentRecord: UserWordRecord = {
+    wordId: 'able',
+    word: 'able',
+    status: 'mastered',
+    tags: ['核心词', '四级'],
+    notes: '第一行笔记\n第二行追加笔记',
+    firstRecordedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-02-02T10:00:00.000Z',
+    lastStudiedAt: '2026-02-02T10:00:00.000Z',
+    studyCount: 3,
+  };
+
+  // 1. Batch import log that simultaneously changed status, studyCount, lastStudiedAt, tags, and notes
+  const batchLog: ActivityLogEntry = {
+    id: 101,
+    timestamp: '2026-02-02T10:00:00.000Z',
+    actionType: 'batch_import',
+    wordId: 'able',
+    word: 'able',
+    previousStatus: 'learning',
+    newStatus: 'mastered',
+    previousTags: ['核心词'],
+    newTags: ['核心词', '四级'],
+    previousNotes: '第一行笔记',
+    newNotes: '第一行笔记\n第二行追加笔记',
+    previousStudyCount: 2,
+    newStudyCount: 3,
+    previousLastStudiedAt: '2026-01-15T08:00:00.000Z',
+    newLastStudiedAt: '2026-02-02T10:00:00.000Z',
+    existedBefore: true,
+  };
+
+  const restored = applyLogUndoToRecord(currentRecord, batchLog, '2026-02-03T00:00:00.000Z');
+  assert.ok(restored);
+  assert.equal(restored.status, 'learning');
+  assert.deepEqual(restored.tags, ['核心词']);
+  assert.equal(restored.notes, '第一行笔记');
+  assert.equal(restored.studyCount, 2);
+  assert.equal(restored.lastStudiedAt, '2026-01-15T08:00:00.000Z');
+
+  // 2. Study touch undo restores studyCount and previousLastStudiedAt without mutating status
+  const touchedRecord: UserWordRecord = {
+    ...restored,
+    studyCount: 3,
+    lastStudiedAt: '2026-02-04T09:00:00.000Z',
+    updatedAt: '2026-02-04T09:00:00.000Z',
+  };
+  const touchLog: ActivityLogEntry = {
+    id: 102,
+    timestamp: '2026-02-04T09:00:00.000Z',
+    actionType: 'study_touch',
+    wordId: 'able',
+    word: 'able',
+    previousStatus: 'learning',
+    newStatus: 'learning',
+    previousStudyCount: 2,
+    newStudyCount: 3,
+    previousLastStudiedAt: '2026-01-15T08:00:00.000Z',
+    newLastStudiedAt: '2026-02-04T09:00:00.000Z',
+    existedBefore: true,
+  };
+  const afterTouchUndo = applyLogUndoToRecord(touchedRecord, touchLog, '2026-02-04T09:05:00.000Z');
+  assert.ok(afterTouchUndo);
+  assert.equal(afterTouchUndo.status, 'learning');
+  assert.equal(afterTouchUndo.studyCount, 2);
+  assert.equal(afterTouchUndo.lastStudiedAt, '2026-01-15T08:00:00.000Z');
+
+  // 3. Undoing the creation of a brand-new record (existedBefore=false) returns null so the row is removed cleanly
+  const firstTimeRecord: UserWordRecord = {
+    wordId: 'newbie',
+    word: 'newbie',
+    status: 'queued',
+    tags: [],
+    notes: '',
+    firstRecordedAt: '2026-02-05T00:00:00.000Z',
+    updatedAt: '2026-02-05T00:00:00.000Z',
+    studyCount: 0,
+  };
+  const firstTimeLog: ActivityLogEntry = {
+    id: 103,
+    timestamp: '2026-02-05T00:00:00.000Z',
+    actionType: 'status_change',
+    wordId: 'newbie',
+    word: 'newbie',
+    previousStatus: 'unrated',
+    newStatus: 'queued',
+    previousStudyCount: 0,
+    newStudyCount: 0,
+    existedBefore: false,
+  };
+  const deletedResult = applyLogUndoToRecord(
+    firstTimeRecord,
+    firstTimeLog,
+    '2026-02-05T00:01:00.000Z'
+  );
+  assert.equal(deletedResult, null);
+});
+
+test('Family CET batch queue selector protects already-rated members by default', () => {
+  const sampleCet = `able\tability\tunable`;
+  const sampleBnc = `List \tHeadword \tRelated forms\tTotal frequency
+1k\table\t"able (29930), abilities (1334), ability (9113), unable (6022), unably (0)"\t46400`;
+  const bundle = buildLexiconDatabase(sampleCet, sampleBnc);
+  const wordsMap = new Map(bundle.words.map((w) => [w.id, w]));
+  const family = bundle.families[0];
+
+  const userRecordsMap = new Map<string, UserWordRecord>([
+    [
+      'able',
+      {
+        wordId: 'able',
+        word: 'able',
+        status: 'mastered',
+        tags: [],
+        notes: '',
+        firstRecordedAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ],
+    [
+      'ability',
+      {
+        wordId: 'ability',
+        word: 'ability',
+        status: 'learning',
+        tags: [],
+        notes: '',
+        firstRecordedAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ],
+  ]);
+
+  // Default (overwriteExisting = false): only "unable" (which is unrated & in CET) is selected
+  const safeQueueIds = selectFamilyCetWordIdsForQueue(family, wordsMap, userRecordsMap, false);
+  assert.deepEqual(safeQueueIds, ['unable']);
+
+  // Explicit opt-in (overwriteExisting = true): all 3 CET members selected
+  const overwriteQueueIds = selectFamilyCetWordIdsForQueue(family, wordsMap, userRecordsMap, true);
+  assert.deepEqual(overwriteQueueIds.sort(), ['ability', 'able', 'unable']);
+});
+
+test('JSON backup merge strictly respects newer updatedAt timestamps for status resets and tag/collection removals', () => {
+  const olderRecord: UserWordRecord = {
+    wordId: 'abandon',
+    word: 'abandon',
+    status: 'mastered',
+    tags: ['高频', '旧标签'],
+    notes: '旧笔记',
+    firstRecordedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-10T00:00:00.000Z',
+    lastStudiedAt: '2026-01-10T00:00:00.000Z',
+    studyCount: 4,
+  };
+
+  // Newer record where user intentionally reset status to 'unrated' and removed '旧标签'
+  const newerResetRecord: UserWordRecord = {
+    wordId: 'abandon',
+    word: 'abandon',
+    status: 'unrated',
+    tags: ['高频'],
+    notes: '更新后的精简笔记',
+    firstRecordedAt: '2026-01-05T00:00:00.000Z',
+    updatedAt: '2026-02-01T00:00:00.000Z',
+    lastStudiedAt: undefined,
+    studyCount: 0,
+  };
+
+  // Regardless of which is local vs incoming, the newer timestamp must win
+  const mergedWhenIncomingNewer = mergeUserWordRecordPair(olderRecord, newerResetRecord);
+  assert.equal(mergedWhenIncomingNewer.status, 'unrated');
+  assert.deepEqual(mergedWhenIncomingNewer.tags, ['高频']);
+  assert.equal(mergedWhenIncomingNewer.notes, '更新后的精简笔记');
+  assert.equal(mergedWhenIncomingNewer.firstRecordedAt, '2026-01-01T00:00:00.000Z');
+
+  const mergedWhenExistingNewer = mergeUserWordRecordPair(newerResetRecord, olderRecord);
+  assert.equal(mergedWhenExistingNewer.status, 'unrated');
+  assert.deepEqual(mergedWhenExistingNewer.tags, ['高频']);
+  assert.equal(mergedWhenExistingNewer.notes, '更新后的精简笔记');
+
+  // Collection merge: newer collection removed 'word_b'
+  const olderCol: WordCollection = {
+    id: 'col_test',
+    name: '测试词集',
+    description: 'v1',
+    type: 'static',
+    wordIds: ['word_a', 'word_b'],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-10T00:00:00.000Z',
+  };
+  const newerCol: WordCollection = {
+    id: 'col_test',
+    name: '测试词集',
+    description: 'v2',
+    type: 'static',
+    wordIds: ['word_a'],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-02-01T00:00:00.000Z',
+  };
+  const mergedCol = mergeWordCollectionPair(olderCol, newerCol);
+  assert.deepEqual(mergedCol.wordIds, ['word_a']);
+  assert.equal(mergedCol.description, 'v2');
+});
+
+test('Custom dataset validator rejects empty, JSON/HTML, or mismatched files without corrupting state', () => {
+  // 1. Empty file rejected
+  assert.throws(() => validateCustomDatasetContent('cet2016', '   \n  '), /词表文件为空/);
+
+  // 2. JSON or HTML file rejected
+  assert.throws(
+    () => validateCustomDatasetContent('cet2016', '{"userWords": []}'),
+    /HTML 或 JSON|JSON 或 HTML/
+  );
+
+  // 3. Uploading BNC_COCA_lists.txt into CET2016 slot rejected
+  const sampleBnc = `List \tHeadword \tRelated forms\tTotal frequency\n1k\table\t"able (29930), ability (9113)"\t39043`;
+  assert.throws(
+    () => validateCustomDatasetContent('cet2016', sampleBnc),
+    /BNC\/COCA 词族表格式/
+  );
+
+  // 4. Uploading CET2016.txt into BNC_COCA slot rejected
+  const sampleCet = `a/an\nable\tability\n★appropriate²\tappropriation`;
+  assert.throws(
+    () => validateCustomDatasetContent('bnc_coca', sampleCet),
+    /未能从文件中解析出任何有效的 BNC\/COCA 词族记录/
+  );
+
+  // 5. Valid files pass and return parsed counts
+  const validCet = validateCustomDatasetContent('cet2016', sampleCet);
+  assert.equal(validCet.entriesCount, 3);
+  const validBnc = validateCustomDatasetContent('bnc_coca', sampleBnc);
+  assert.equal(validBnc.entriesCount, 1);
+});
+
+test('Multiline RFC 4180 CSV export/import round-trips commas, quotes, newlines, phrases, and Chinese notes', () => {
+  const sampleCet = `able\tability
+owe\towing to
+baby boom\tbaby boomer
+★appropriate²\tappropriation`;
+  const sampleBnc = `List \tHeadword \tRelated forms\tTotal frequency
+1k\table\t"able (29930), abilities (1334), ability (9113), unably (0)"\t40377`;
+  const bundle = buildLexiconDatabase(sampleCet, sampleBnc);
+  const wordsMap = new Map(bundle.words.map((w) => [w.id, w]));
+
+  // Construct an exported 9-column CSV containing multiline notes, quotes, commas, and a phrase with empty BNC_Band
+  const header =
+    'Word,CET_Levels,BNC_Band,Headword,Form_Frequency,Family_Frequency,Learning_Status,Tags,Notes';
+  const multilineNote1 = '第一行：be able to do sth.\n第二行：区分 "ability" 与 "capacity"，常考搭配';
+  const multilineNote2 = '多词短语：owing to (由于)\r\n注意后接名词性短语，含逗号,引号"测试"';
+
+  const row1 = [
+    escapeCsvField('able'),
+    escapeCsvField('CET4'),
+    escapeCsvField('1k'),
+    escapeCsvField('able'),
+    '29930',
+    '40377',
+    escapeCsvField('mastered'),
+    escapeCsvField('高频;核心词'),
+    escapeCsvField(multilineNote1),
+  ].join(',');
+
+  const row2 = [
+    escapeCsvField('owing to'),
+    escapeCsvField('CET4'),
+    escapeCsvField(''), // Phrase not in BNC -> empty BNC_Band
+    escapeCsvField(''),
+    '',
+    '',
+    escapeCsvField('learning'),
+    escapeCsvField('真题短语;阅读'),
+    escapeCsvField(multilineNote2),
+  ].join(',');
+
+  const exportedCsv = `\uFEFF${header}\n${row1}\n${row2}\n`;
+
+  // Verify splitCsvRecords keeps embedded newlines inside quotes intact
+  const logicalRecords = splitCsvRecords(exportedCsv);
+  assert.equal(logicalRecords.length, 3);
+
+  // Round-trip parse via parseBatchInputText
+  const parsed = parseBatchInputText(exportedCsv, wordsMap, bundle.words);
+  assert.equal(parsed.length, 2);
+
+  assert.equal(parsed[0].matchedWord?.id, 'able');
+  assert.equal(parsed[0].parsedStatus, 'mastered');
+  assert.deepEqual(parsed[0].parsedTags, ['高频', '核心词']);
+  assert.equal(parsed[0].parsedNote, multilineNote1);
+
+  assert.equal(parsed[1].matchedWord?.id, 'owing to');
+  assert.equal(parsed[1].parsedStatus, 'learning');
+  assert.deepEqual(parsed[1].parsedTags, ['真题短语', '阅读']);
+  assert.equal(parsed[1].parsedNote, multilineNote2.replace(/\r\n/g, '\n'));
+});
+
+test('Intra-family share helper strictly distinguishes null, explicit 0%, <1% non-zero, and >=1%', () => {
+  // 1. Explicit 0 frequency -> 0% with 0 bar width
+  const zeroShare = getIntraFamilyShareDetail(0, 47760);
+  assert.equal(zeroShare.label, '0%');
+  assert.equal(zeroShare.exactPct, 0);
+  assert.equal(zeroShare.isUltraLowNonZero, false);
+  assert.equal(formatFamilyRoleAndShare(false, 7, 0, 47760, true, false), '派生 · 占族 0%');
+
+  // 2. Non-zero ultra-low share (105 / 47760 = 0.22%) -> <1% label and isUltraLowNonZero = true
+  const ultraLow = getIntraFamilyShareDetail(105, 47760);
+  assert.equal(ultraLow.label, '<1%');
+  assert.equal(ultraLow.isUltraLowNonZero, true);
+  assert.ok(ultraLow.exactPct !== null && ultraLow.exactPct > 0 && ultraLow.exactPct < 1);
+  assert.equal(formatFamilyRoleAndShare(false, 7, 105, 47760, true, false), '派生 · 占族 <1%');
+
+  // 3. Null frequency (variant linked) -> '—'
+  const nullShare = getIntraFamilyShareDetail(null, 1682);
+  assert.equal(nullShare.label, '—');
+  assert.equal(nullShare.pct, null);
+  assert.equal(nullShare.exactPct, 0);
+  assert.equal(formatFamilyRoleAndShare(false, 3, null, 1682, false, true), '关联词族 · 族3词');
+});
+
