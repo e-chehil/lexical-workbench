@@ -2,11 +2,14 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Safely register PWA service worker in production when allowed by browser security policy
+// Safely register PWA service worker in production using Vite's BASE_URL (supports '/' and '/lexical-workbench/')
 if (import.meta.env.PROD && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     try {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      const base = import.meta.env.BASE_URL || '/';
+      const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+      const swUrl = `${normalizedBase}sw.js`;
+      navigator.serviceWorker.register(swUrl, { scope: normalizedBase }).catch(() => {
         // Ignore SecurityError in sandboxed/third-party iframes
       });
     } catch {

@@ -79,6 +79,8 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     collections[0]?.id || 'builtin-cet4-core'
   );
   const [mobilePane, setMobilePane] = useState<'list' | 'planner'>('list');
+  // On md/lg (768px-1279px), the center table can display either the active collection OR the planner preview
+  const [centerMode, setCenterMode] = useState<'collection' | 'planner_preview'>('collection');
   const [strategy, setStrategy] = useState<PresetStrategy>('cet4_core_1k_3k');
   const [batchSize, setBatchSize] = useState<number>(50);
   const [batchName, setBatchName] = useState<string>('');
@@ -193,6 +195,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     onBatchSetStatus(ids, 'queued');
     setBatchName('');
     setJustCreated(true);
+    setCenterMode('collection');
     setTimeout(() => setJustCreated(false), 2000);
   };
 
@@ -224,10 +227,77 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     return Math.max(...activeCollectionWords.map((w) => w.formFrequency || 0), 100);
   }, [activeCollectionWords]);
 
+  const plannerFormControls = (
+    <div className="space-y-2.5">
+      <div>
+        <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
+          选词策略 (已自动过滤基础虚词)
+        </label>
+        <select
+          value={strategy}
+          onChange={(e) => setStrategy(e.target.value as PresetStrategy)}
+          className="w-full px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+        >
+          <option value="cet4_core_1k_3k">CET-4 高频核心实词 (1k–3k 未掌握)</option>
+          <option value="cet6_core_2k_5k">CET-6 核心学术进阶 (2k–5k 未掌握)</option>
+          <option value="high_value_family_roots">高派生大词族首词 (1k–4k · 成员≥5)</option>
+          <option value="family_completion">已掌握词族的未学派生词补全</option>
+          <option value="cet4_remaining">CET-4 全量查漏补缺</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
+            批次词数
+          </label>
+          <select
+            value={batchSize}
+            onChange={(e) => setBatchSize(Number(e.target.value))}
+            className="w-full px-2 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none"
+          >
+            <option value={30}>30 词 / 批</option>
+            <option value={50}>50 词 / 批</option>
+            <option value={100}>100 词 / 批</option>
+            <option value={200}>200 词 / 批</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
+            批次名称 (选填)
+          </label>
+          <input
+            type="text"
+            value={batchName}
+            onChange={(e) => setBatchName(e.target.value)}
+            placeholder="自动按日期命名..."
+            className="w-full px-2 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSaveBatchAsCollection}
+        disabled={plannerCandidates.length === 0}
+        className="w-full py-2 px-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+      >
+        {justCreated ? (
+          <>
+            <Check className="w-3.5 h-3.5" />
+            已生成词集并标为待学
+          </>
+        ) : (
+          <>生成学习批次 ({plannerCandidates.length} 词)</>
+        )}
+      </button>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col xl:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
-      {/* Sub-View Switcher (<1280px) so medium screens (768px-1279px) never squeeze 3 columns simultaneously */}
-      <div className="xl:hidden min-h-[42px] py-1.5 px-4 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+    <div className="flex flex-col md:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
+      {/* Mobile Sub-View Switcher (<768px only) */}
+      <div className="md:hidden min-h-[42px] py-1.5 px-4 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
@@ -235,10 +305,10 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
               mobilePane === 'list'
                 ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                : 'text-[var(--text-muted)]'
             }`}
           >
-            词集列表 ({collections.length})
+            词集 ({collections.length})
           </button>
           <button
             type="button"
@@ -246,54 +316,41 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
               mobilePane === 'planner'
                 ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                : 'text-[var(--text-muted)]'
             }`}
           >
-            下一批规划器
+            批次规划器
           </button>
         </div>
 
         {mobilePane === 'list' && (
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5">
             <select
               value={activeCollection?.id || ''}
               onChange={(e) => setSelectedCollectionId(e.target.value)}
               aria-label="选择词集"
-              className="max-w-[200px] sm:max-w-[260px] px-2.5 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-primary)] truncate"
+              className="max-w-[160px] px-2 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] truncate"
             >
               {collections.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.type === 'dynamic' ? `动态 · ${c.name}` : c.name}
+                  {c.name}
                 </option>
               ))}
             </select>
-
             <button
               type="button"
               onClick={() => setShowNewModal(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--accent-primary)] hover:border-[var(--accent-primary)] whitespace-nowrap shrink-0 cursor-pointer"
+              className="p-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--accent-primary)] cursor-pointer"
+              title="新建词集"
             >
               <Plus className="w-3.5 h-3.5" />
-              新建词集
             </button>
-
-            {activeCollection && (
-              <button
-                type="button"
-                onClick={() => onDeleteCollection(activeCollection.id)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-rose-500 whitespace-nowrap shrink-0 cursor-pointer"
-                title="删除当前词集"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">删除</span>
-              </button>
-            )}
           </div>
         )}
       </div>
 
-      {/* Zone 1: Left Collections Directory (Wide Desktop >=1280px) */}
-      <aside className="hidden xl:flex xl:w-[260px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full min-h-0">
+      {/* Zone 1: Left Collections Directory + Integrated Medium-Screen Planner Studio (md: 270px, lg: 300px, xl: 260px) */}
+      <aside className="hidden md:flex md:w-[270px] lg:w-[300px] xl:w-[260px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full min-h-0">
         <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
           <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
             词集与学习批次 ({collections.length})
@@ -310,7 +367,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
         <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
           {collections.map((col) => {
-            const isSelected = activeCollection?.id === col.id;
+            const isSelected = activeCollection?.id === col.id && centerMode === 'collection';
             const colWords =
               col.type === 'dynamic' && col.filterCriteria
                 ? filterAndSortWords(
@@ -333,7 +390,10 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             return (
               <div
                 key={col.id}
-                onClick={() => setSelectedCollectionId(col.id)}
+                onClick={() => {
+                  setSelectedCollectionId(col.id);
+                  setCenterMode('collection');
+                }}
                 className={`p-3 cursor-pointer transition-colors ${
                   isSelected
                     ? 'bg-[var(--accent-soft)]'
@@ -379,15 +439,106 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             );
           })}
         </div>
+
+        {/* Integrated Next-Batch Planner on Medium Screens (768px - 1279px) so 2-Column Layout is Rich & Balanced */}
+        <div className="xl:hidden p-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2.5 shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
+              下一批学习规划器
+            </h3>
+            <button
+              type="button"
+              onClick={() =>
+                setCenterMode((m) => (m === 'planner_preview' ? 'collection' : 'planner_preview'))
+              }
+              className={`text-[11px] font-medium px-2 py-0.5 rounded border cursor-pointer transition-colors ${
+                centerMode === 'planner_preview'
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
+                  : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {centerMode === 'planner_preview' ? '返回词集表' : `预览候选 (${plannerCandidates.length})`}
+            </button>
+          </div>
+          {plannerFormControls}
+        </div>
       </aside>
 
-      {/* Zone 2: Center Collection Word Table */}
+      {/* Zone 2: Center Main Table (Collection Word Table OR Medium-Screen Planner Preview) */}
       <div
         className={`flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
-          mobilePane === 'list' ? 'flex' : 'hidden xl:flex'
+          mobilePane === 'list' ? 'flex' : 'hidden md:flex'
         }`}
       >
-        {activeCollection ? (
+        {centerMode === 'planner_preview' ? (
+          <>
+            <div className="px-4 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)]">
+                  下一批候选实词优先级预览 ({plannerCandidates.length} 词)
+                </h2>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  已按词频、四六级大纲权重与熟词族派生杠杆综合排序
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCenterMode('collection')}
+                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              >
+                返回当前词集
+              </button>
+            </div>
+
+            <div className="grid grid-cols-[44px_minmax(120px,1.3fr)_68px_minmax(110px,1fr)_120px_76px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+              <div>序号</div>
+              <div>候选词条</div>
+              <div>大纲</div>
+              <div>所属词族与频段</div>
+              <div>推荐理由</div>
+              <div className="text-right">权重分</div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+              {plannerCandidates.map(({ entry, score, reason }, idx) => (
+                <div
+                  key={entry.id}
+                  onClick={() => onSelectWord(entry)}
+                  className="grid grid-cols-[44px_minmax(120px,1.3fr)_68px_minmax(110px,1fr)_120px_76px] items-center px-4 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs"
+                >
+                  <div className="font-mono-tabular text-[var(--text-muted)]">{idx + 1}.</div>
+                  <div
+                    translate="no"
+                    className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
+                  >
+                    {entry.word}
+                  </div>
+                  <div className="font-mono-tabular">
+                    {entry.isCet4 ? (
+                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                        CET-4
+                      </span>
+                    ) : entry.isCet6 ? (
+                      <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
+                        CET-6
+                      </span>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">—</span>
+                    )}
+                  </div>
+                  <div className="font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
+                    {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-muted)] truncate pr-2">{reason}</div>
+                  <div className="text-right font-mono-tabular font-semibold text-[var(--accent-primary)]">
+                    {score}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : activeCollection ? (
           <>
             <div className="px-4 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
               <div className="min-w-0">
@@ -438,10 +589,11 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             </div>
 
             {/* Table Column Header */}
-            <div className="grid grid-cols-[minmax(105px,1.4fr)_58px_100px_76px] md:grid-cols-[minmax(125px,1.4fr)_64px_minmax(95px,1fr)_126px_80px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[minmax(105px,1.3fr)_58px_100px_76px] sm:grid-cols-[minmax(120px,1.2fr)_64px_minmax(100px,1fr)_minmax(96px,0.9fr)_126px_80px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
               <div>词条</div>
               <div>大纲</div>
-              <div className="hidden md:block">词族与频段</div>
+              <div className="hidden sm:block">词族与频段</div>
+              <div className="hidden sm:block">同族规模</div>
               <div className="text-right pr-2">词形 / 词族频次</div>
               <div className="text-right">状态</div>
             </div>
@@ -467,7 +619,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   <div
                     key={entry.id}
                     onClick={() => onSelectWord(entry)}
-                    className="grid grid-cols-[minmax(105px,1.4fr)_58px_100px_76px] md:grid-cols-[minmax(125px,1.4fr)_64px_minmax(95px,1fr)_126px_80px] items-center px-4 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className="grid grid-cols-[minmax(105px,1.3fr)_58px_100px_76px] sm:grid-cols-[minmax(120px,1.2fr)_64px_minmax(100px,1fr)_minmax(96px,0.9fr)_126px_80px] items-center px-4 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                   >
                     <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
                       <span
@@ -499,7 +651,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       )}
                     </div>
 
-                    <div className="hidden md:flex items-center gap-1.5 text-xs font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
+                    <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
                       {entry.band ? (
                         <>
                           <span className="font-semibold text-[var(--text-primary)]">
@@ -515,6 +667,12 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       )}
                     </div>
 
+                    <div className="hidden sm:block text-[11px] font-mono-tabular text-[var(--text-muted)] truncate pr-2">
+                      {entry.familyId
+                        ? `${entry.isHeadword ? '词头' : '派生'} · 族${entry.familyMemberCount}词`
+                        : '独立词条'}
+                    </div>
+
                     <div className="text-right pr-2 font-mono-tabular">
                       <div className="flex items-baseline justify-end gap-1 text-xs whitespace-nowrap">
                         <span className="font-medium text-[var(--text-primary)]">
@@ -524,7 +682,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                           /{(entry.familyFrequency || 0).toLocaleString()}
                         </span>
                       </div>
-                      <div className="hidden md:block h-1 w-20 ml-auto mt-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
+                      <div className="hidden sm:block h-1 w-20 ml-auto mt-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                         <div
                           className="h-full bg-[var(--accent-primary)] opacity-75"
                           style={{ width: `${barWidth}%` }}
@@ -560,10 +718,10 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
         ) : null}
       </div>
 
-      {/* Zone 3: Right Next-Batch Planner Studio (xl+ 360px, or full width when planner tab selected on <1280px) */}
+      {/* Zone 3: Right Next-Batch Planner Studio (xl+ 350px, or mobile <768px when planner tab active) */}
       <aside
-        className={`w-full xl:w-[360px] xl:border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 xl:flex-initial h-full min-h-0 overflow-hidden ${
-          mobilePane === 'planner' ? 'flex' : 'hidden xl:flex'
+        className={`w-full xl:w-[350px] xl:border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 xl:flex-initial h-full min-h-0 overflow-hidden ${
+          mobilePane === 'planner' ? 'flex md:hidden xl:flex' : 'hidden xl:flex'
         }`}
       >
         <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-3 shrink-0">
@@ -575,70 +733,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">多维加权排序</span>
           </div>
 
-          <div className="space-y-2">
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-                选词策略 (已自动过滤基础虚词)
-              </label>
-              <select
-                value={strategy}
-                onChange={(e) => setStrategy(e.target.value as PresetStrategy)}
-                className="w-full px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
-              >
-                <option value="cet4_core_1k_3k">CET-4 高频核心实词 (1k–3k 未掌握)</option>
-                <option value="cet6_core_2k_5k">CET-6 核心学术进阶 (2k–5k 未掌握)</option>
-                <option value="high_value_family_roots">高派生大词族首词 (1k–4k · 成员≥5)</option>
-                <option value="family_completion">已掌握词族的未学派生词补全</option>
-                <option value="cet4_remaining">CET-4 全量查漏补缺</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-                  批次词数
-                </label>
-                <select
-                  value={batchSize}
-                  onChange={(e) => setBatchSize(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none"
-                >
-                  <option value={30}>30 词 / 批</option>
-                  <option value={50}>50 词 / 批</option>
-                  <option value={100}>100 词 / 批</option>
-                  <option value={200}>200 词 / 批</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-                  批次名称 (选填)
-                </label>
-                <input
-                  type="text"
-                  value={batchName}
-                  onChange={(e) => setBatchName(e.target.value)}
-                  placeholder="自动按日期命名..."
-                  className="w-full px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
-                />
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSaveBatchAsCollection}
-              disabled={plannerCandidates.length === 0}
-              className="w-full py-2 px-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            >
-              {justCreated ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  已生成词集并标为待学
-                </>
-              ) : (
-                <>生成学习批次 ({plannerCandidates.length} 词)</>
-              )}
-            </button>
-          </div>
+          {plannerFormControls}
         </div>
 
         {/* Candidate Preview List */}

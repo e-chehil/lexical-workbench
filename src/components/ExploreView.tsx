@@ -636,9 +636,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-4 py-1.5 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 text-xs shrink-0 overflow-x-auto">
+        <div className="px-4 py-1.5 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
           {/* Left Facets: Band Ranges + Status Filters + Reset */}
-          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <div className="inline-flex items-center gap-0.5">
               {BAND_RANGES.map((preset) => {
                 const active =
@@ -687,7 +687,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     }`}
                   >
                     <span>{meta.shortLabel}</span>
-                    <span className="font-mono-tabular text-[10px] opacity-70">
+                    <span className="hidden xl:inline font-mono-tabular text-[10px] opacity-70">
                       {statusCounts[st]}
                     </span>
                   </button>
@@ -711,7 +711,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           </div>
 
           {/* Right: Batch Selection Mode Entry */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             <button
               type="button"
               onClick={() => handleSelectTopN(50)}
@@ -870,8 +870,8 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         </div>
       )}
 
-      {/* 6-Column Swiss Data Table Header */}
-      <div className="hidden sm:grid sm:grid-cols-[36px_minmax(150px,1.5fr)_84px_minmax(115px,1.2fr)_165px_80px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none">
+      {/* Swiss Data Table Header (Balanced column proportions across sm/md/lg/xl) */}
+      <div className="hidden sm:grid sm:grid-cols-[34px_minmax(120px,1.2fr)_72px_minmax(95px,1fr)_140px_76px] md:grid-cols-[36px_minmax(130px,1.2fr)_72px_minmax(100px,1fr)_minmax(115px,1.1fr)_148px_78px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none">
         <div className="flex items-center">
           <div
             role="checkbox"
@@ -896,6 +896,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         <div>词条 (含考纲原貌)</div>
         <div>大纲属性</div>
         <div>词族与频段</div>
+        <div className="hidden md:block">同族结构 / 标签</div>
         <div className="text-right pr-2">词形 / 词族频次</div>
         <div className="text-right">状态</div>
       </div>
@@ -1066,7 +1067,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
-                  className={`group grid grid-cols-[36px_minmax(150px,1.5fr)_84px_minmax(115px,1.2fr)_165px_80px] items-center px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
+                  className={`group grid grid-cols-[34px_minmax(120px,1.2fr)_72px_minmax(95px,1fr)_140px_76px] md:grid-cols-[36px_minmax(130px,1.2fr)_72px_minmax(100px,1fr)_minmax(115px,1.1fr)_148px_78px] items-center px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
                     isChecked
                       ? 'bg-[var(--accent-soft)]/90'
                       : isSelected
@@ -1110,7 +1111,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Col 2: Headword + Official CET2016 Raw Variant Notation + Tag */}
+                  {/* Col 2: Headword + Official CET2016 Raw Variant Notation */}
                   <div className="min-w-0 pr-2 flex items-baseline gap-2">
                     <span
                       translate="no"
@@ -1130,11 +1131,6 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         title={`考纲原貌: ${specialCetRaw}`}
                       >
                         考纲: {specialCetRaw}
-                      </span>
-                    )}
-                    {userRec?.tags && userRec.tags.length > 0 && (
-                      <span className="text-[11px] font-mono-tabular text-[var(--accent-primary)] truncate max-w-[90px] hidden xl:inline">
-                        #{userRec.tags[0]}
                       </span>
                     )}
                   </div>
@@ -1186,7 +1182,23 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     )}
                   </div>
 
-                  {/* Col 5: Form / Family Frequency + Proportion Bar */}
+                  {/* Col 5 (md+): Family Role / Member Count / User Tags */}
+                  <div className="hidden md:flex items-center gap-1.5 min-w-0 pr-2 font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                    {word.familyId ? (
+                      <span className="truncate">
+                        {word.isHeadword ? '词头' : '派生'} · 族{word.familyMemberCount}词
+                      </span>
+                    ) : (
+                      <span>考纲独立词</span>
+                    )}
+                    {userRec?.tags && userRec.tags.length > 0 && (
+                      <span className="text-[var(--accent-primary)] truncate">
+                        #{userRec.tags[0]}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Col 6: Form / Family Frequency + Proportion Bar */}
                   <div className="pr-2 flex flex-col items-end justify-center">
                     <div className="font-mono-tabular text-[11px] flex items-baseline gap-1">
                       <span
@@ -1214,7 +1226,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     )}
                   </div>
 
-                  {/* Col 6: Clean Status Selector */}
+                  {/* Col 7: Clean Status Selector */}
                   <div
                     className="flex justify-end"
                     onClick={(e) => e.stopPropagation()}

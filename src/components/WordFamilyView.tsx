@@ -468,10 +468,10 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
           </div>
 
           {/* Column Headers */}
-          <div className="grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] lg:grid-cols-[minmax(125px,1.4fr)_64px_minmax(90px,1fr)_84px_92px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+          <div className="grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
             <div>词形与角色</div>
             <div>大纲</div>
-            <div className="hidden lg:block">族内频次占比</div>
+            <div className="hidden sm:block">族内频次占比</div>
             <div className="text-right pr-2">独立频次</div>
             <div className="text-right">状态与词典</div>
           </div>
@@ -494,7 +494,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                   onClick={() => {
                     if (entry) onSelectWord(entry);
                   }}
-                  className={`grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] lg:grid-cols-[minmax(125px,1.4fr)_64px_minmax(90px,1fr)_84px_92px] items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
+                  className={`grid grid-cols-[minmax(100px,1.4fr)_56px_74px_86px] sm:grid-cols-[minmax(115px,1.2fr)_60px_minmax(100px,1fr)_82px_90px] items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
                     isHighlighted
                       ? 'bg-[var(--accent-soft)]'
                       : 'hover:bg-[var(--bg-hover)]'
@@ -533,8 +533,8 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                     )}
                   </div>
 
-                  {/* Intra-family proportion bar (lg+) */}
-                  <div className="hidden lg:flex items-center gap-2 pr-3">
+                  {/* Intra-family proportion bar (sm+) */}
+                  <div className="hidden sm:flex items-center gap-2 pr-3">
                     <div className="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                       <div
                         className="h-full bg-[var(--accent-primary)] transition-all"

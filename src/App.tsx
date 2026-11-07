@@ -172,7 +172,7 @@ export default function App() {
   const [showDetailDrawer, setShowDetailDrawer] = useState<boolean>(() => {
     const initialView = safeGetSearchParam('view') as NavViewId | null;
     if (initialView && initialView !== 'explore') return false;
-    return typeof window !== 'undefined' ? window.innerWidth >= 1280 : true;
+    return typeof window !== 'undefined' ? window.innerWidth >= 1024 : true;
   });
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null);
   const [highlightedFamilyWordId, setHighlightedFamilyWordId] = useState<string | null>(null);
@@ -181,7 +181,7 @@ export default function App() {
   const handleSwitchView = useCallback((nextView: NavViewId) => {
     setActiveView(nextView);
     if (nextView === 'explore') {
-      if (typeof window !== 'undefined' && window.innerWidth >= 1280) {
+      if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
         setShowDetailDrawer(true);
       }
     } else {
@@ -233,15 +233,15 @@ export default function App() {
   }, [activeView, criteria.searchQuery, selectedWordId]);
 
   useEffect(() => {
-    let wasWideDesktop = window.innerWidth >= 1280;
+    let wasDesktop = window.innerWidth >= 1024;
     const handleResize = () => {
-      const isWideDesktop = window.innerWidth >= 1280;
-      if (wasWideDesktop && !isWideDesktop) {
+      const isDesktop = window.innerWidth >= 1024;
+      if (wasDesktop && !isDesktop) {
         setShowDetailDrawer(false);
-      } else if (!wasWideDesktop && isWideDesktop && activeView === 'explore') {
+      } else if (!wasDesktop && isDesktop && activeView === 'explore') {
         setShowDetailDrawer(true);
       }
-      wasWideDesktop = isWideDesktop;
+      wasDesktop = isDesktop;
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -269,7 +269,7 @@ export default function App() {
     }
   }, []);
 
-  // Load Lexicon Data
+  // Load Lexicon Data (supports both root '/' in AI Studio and '/lexical-workbench/' on GitHub Pages)
   const loadLexiconData = useCallback(async () => {
     try {
       setLoadingError(null);
@@ -286,19 +286,30 @@ export default function App() {
       let cetText = customCet?.content || '';
       let bncText = customBnc?.content || '';
 
+      const base = import.meta.env.BASE_URL || '/';
+      const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+      const resolvePublicUrl = (relPath: string) =>
+        `${normalizedBase}${relPath.replace(/^\/+/, '')}`;
+
       if (!cetText) {
-        const res = await fetch('/data/CET2016.txt').catch(() =>
-          fetch('/assets/aistudio/CET2016_c8581113.txt')
-        );
-        if (!res.ok) throw new Error('无法读取 CET2016.txt 词表文件');
+        let res = await fetch(resolvePublicUrl('data/CET2016.txt')).catch(() => null);
+        if (!res || !res.ok) {
+          res = await fetch(resolvePublicUrl('assets/aistudio/CET2016_c8581113.txt')).catch(
+            () => null
+          );
+        }
+        if (!res || !res.ok) throw new Error('无法读取 CET2016.txt 词表文件');
         cetText = await res.text();
       }
 
       if (!bncText) {
-        const res = await fetch('/data/BNC_COCA_lists.txt').catch(() =>
-          fetch('/assets/aistudio/BNC_COCA_lists_9ec2b6a0.txt')
-        );
-        if (!res.ok) throw new Error('无法读取 BNC_COCA_lists.txt 词表文件');
+        let res = await fetch(resolvePublicUrl('data/BNC_COCA_lists.txt')).catch(() => null);
+        if (!res || !res.ok) {
+          res = await fetch(resolvePublicUrl('assets/aistudio/BNC_COCA_lists_9ec2b6a0.txt')).catch(
+            () => null
+          );
+        }
+        if (!res || !res.ok) throw new Error('无法读取 BNC_COCA_lists.txt 词表文件');
         bncText = await res.text();
       }
 

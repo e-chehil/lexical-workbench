@@ -5,51 +5,54 @@ import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  const isGitHubPages = process.env.GITHUB_PAGES === 'true';
+  const rawBase =
+    process.env.VITE_BASE_PATH || (isGitHubPages ? '/lexical-workbench/' : '/');
+  const basePath = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+
   return {
+    base: basePath,
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: null,
-        includeAssets: [
-          'icon.svg',
-          'apple-touch-icon.png',
-          'pwa-192x192.png',
-          'pwa-512x512.png',
-          'pwa-maskable-512x512.png',
-        ],
         workbox: {
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,svg,png,txt,json}'],
+          navigateFallback: 'index.html',
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
         },
         manifest: {
-          id: '/',
+          id: basePath,
           name: 'Lexical Workbench — 英语词汇数据库与词族分析工作台',
           short_name: 'LexicalWB',
           description:
             '本地优先的个人英语词汇数据库、BNC/COCA 词族检索、CET-4/CET-6 大纲对照与学习规划系统',
-          theme_color: '#287A6B',
-          background_color: '#F7F8F6',
+          theme_color: '#1D4ED8',
+          background_color: '#F8FAFC',
           display: 'standalone',
           orientation: 'any',
-          scope: '/',
-          start_url: '/',
+          scope: basePath,
+          start_url: basePath,
           icons: [
             {
-              src: 'pwa-192x192.png',
+              src: `${basePath}pwa-192x192.png`,
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-512x512.png',
+              src: `${basePath}pwa-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-maskable-512x512.png',
+              src: `${basePath}pwa-maskable-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -63,7 +66,7 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {

@@ -231,14 +231,14 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
 
       {/* Authoritative Dictionary Bar (Hairline Grid instead of Floating Pills) */}
       {enabledDicts.length > 0 && (
-        <div className="grid grid-cols-3 sm:grid-cols-6 divide-x divide-y sm:divide-y-0 divide-[var(--border-subtle)] border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] shrink-0">
+        <div className="grid grid-cols-3 divide-x divide-y divide-[var(--border-subtle)] border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] shrink-0">
           {enabledDicts.slice(0, 6).map((dict) => (
             <a
               key={dict.id}
               href={buildDictionaryUrl(dict.urlTemplate, word.word)}
               target="_blank"
               rel="noopener noreferrer"
-              className="py-2 px-2 flex items-center justify-center gap-1 font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--bg-surface)] transition-colors whitespace-nowrap truncate focus-ring"
+              className="py-1.5 px-2 flex items-center justify-center gap-1 font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:bg-[var(--bg-surface)] transition-colors whitespace-nowrap truncate focus-ring"
               title={`在 ${dict.name} 查询 ${word.word}`}
             >
               <span className="truncate">{dict.shortName}</span>
@@ -579,16 +579,16 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
 
   return (
     <>
-      {/* Wide Desktop 12-Column Grid Slot (Cols 10-12: xl:col-span-3) */}
+      {/* Desktop Docked Inspector (lg+ in ExploreView, or Overlay when overlayOnDesktop is true) */}
       {overlayOnDesktop ? (
         <div
-          className="hidden xl:grid fixed inset-0 z-40 grid-cols-12 bg-black/25 backdrop-blur-[1px]"
+          className="hidden lg:grid fixed inset-0 z-40 grid-cols-12 bg-black/25 backdrop-blur-[1px]"
           onClick={onClose}
         >
           <aside
             aria-label="词条详情"
             onClick={(e) => e.stopPropagation()}
-            className="col-start-10 col-span-3 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl grid grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text"
+            className="col-start-9 xl:col-start-10 col-end-13 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl grid grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text"
           >
             {inspectorBody}
           </aside>
@@ -596,15 +596,15 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
       ) : (
         <aside
           aria-label="词条详情"
-          className="hidden xl:grid xl:col-span-3 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text z-20"
+          className="hidden lg:grid lg:w-[340px] xl:w-[390px] shrink-0 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text z-20"
         >
           {inspectorBody}
         </aside>
       )}
 
-      {/* Medium-Screen Slide-Over Sheet (768px - 1279px) */}
+      {/* Tablet Slide-Over Sheet (768px - 1023px) */}
       <div
-        className="hidden md:grid xl:hidden fixed inset-0 z-40 grid-cols-12 bg-black/30 backdrop-blur-[1px]"
+        className="hidden md:grid lg:hidden fixed inset-0 z-40 grid-cols-12 bg-black/30 backdrop-blur-[1px]"
         onClick={onClose}
       >
         <aside
@@ -612,7 +612,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
           aria-modal="true"
           aria-label={`${word.word} 词条详情`}
           onClick={(e) => e.stopPropagation()}
-          className="col-start-8 lg:col-start-9 col-end-13 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl grid grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text"
+          className="col-start-7 col-end-13 border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl grid grid-rows-[minmax(0,1fr)] h-full min-h-0 select-text"
         >
           {inspectorBody}
         </aside>
