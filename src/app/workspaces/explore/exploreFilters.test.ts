@@ -21,13 +21,16 @@ import {
   aggregateSpecsFor,
   countActiveFilters,
   defaultExploreState,
+  filterChips,
   formatMetricValue,
-  filtersForKind,
   fromLexQuery,
+  inapplicableFilters,
   isExploreKind,
+  removeFilterChip,
   sanitizeColumns,
   sortForKind,
   toLexQuery,
+  type ExploreFilters,
   type ExploreState,
 } from './filterState.ts';
 
@@ -71,7 +74,7 @@ test('explore: CET6 + headword rank ≤ 5000 + unrated maps to the expected LexQ
   });
 });
 
-test('explore: every facet reaches the query, and paging only when asked', () => {
+test('explore: every applicable facet reaches the query, and paging only when asked', () => {
   const state: ExploreState = {
     kind: 'bnc_member',
     text: '  went  ',
@@ -81,7 +84,7 @@ test('explore: every facet reaches the query, and paging only when asked', () =>
       sourcesPresent: ['bnc25k'],
       sourcesAbsent: ['coca2020'],
       pos: ['verb'],
-      lpRank: { min: 1, max: 1000 },
+      lpRank: {},
       band: { max: 3 },
       cetLevels: ['CET4'],
       status: ['learning'],
@@ -101,7 +104,6 @@ test('explore: every facet reaches the query, and paging only when asked', () =>
       { type: 'source_presence', source: 'bnc25k', present: true },
       { type: 'source_presence', source: 'coca2020', present: false },
       { type: 'coca_pos', pos: ['verb'] },
-      { type: 'metric_range', metric: 'coca2020.lp_rank', min: 1, max: 1000 },
       { type: 'metric_range', metric: 'bnc25k.family_band', max: 3 },
       { type: 'cet_level', levels: ['CET4'] },
       { type: 'learning_status', statuses: ['learning'], resolution: 'own' },
@@ -119,11 +121,15 @@ test('explore: every facet reaches the query, and paging only when asked', () =>
 
   // An empty text box sends no text filter at all (it must not narrow to the empty string).
   assert.equal(toLexQuery({ ...state, text: '   ' }).text, undefined);
+
+  // Inapplicable ranges never travel with the wrong kind (they become disabled chips instead).
+  const withLpRank = { ...state, filters: { ...state.filters, lpRank: { min: 1, max: 1000 } } };
+  assert.ok(!toLexQuery(withLpRank).filters?.some((filter) => filter.type === 'metric_range' && filter.metric === 'coca2020.lp_rank'));
 });
 
 test('explore: an empty panel is an empty query, not a filter that matches nothing', () => {
   assert.deepEqual(toLexQuery(defaultExploreState()), { kind: 'form', sort: [{ by: 'spelling', dir: 'asc' }] });
-  assert.equal(countActiveFilters(EMPTY_FILTERS), 0);
+  assert.equal(countActiveFilters(EMPTY_FILTERS, 'form'), 0);
 });
 
 test('explore: query → panel round-trips every facet and keeps unknown filters', () => {
@@ -136,7 +142,7 @@ test('explore: query → panel round-trips every facet and keeps unknown filters
       ...EMPTY_FILTERS,
       sourcesAbsent: ['coca2020'],
       pos: ['noun'],
-      lpRank: { min: 10 },
+      lpRank: {},
       hwRank: { max: 20000 },
       band: { min: 1, max: 5 },
       cetLevels: ['CET4', 'CET6'],
@@ -148,9 +154,16 @@ test('explore: query → panel round-trips every facet and keeps unknown filters
     },
   };
 
+  // The round-trip covers every applicable facet. Inapplicable ranges are withheld from the URL
+  // by design (Shape Brief §4.1): they live in panel state only and never reach the query.
   const query = toLexQuery(state);
   assert.deepEqual(fromLexQuery(query), state);
   assert.deepEqual(fromLexQuery(undefined), defaultExploreState());
+
+  const withLpRank: ExploreState = { ...state, filters: { ...state.filters, lpRank: { min: 10 } } };
+  assert.ok(!toLexQuery(withLpRank).filters?.some((filter) => filter.type === 'metric_range' && filter.metric === 'coca2020.lp_rank'));
+  const restoredLpRank = fromLexQuery(toLexQuery(withLpRank));
+  assert.deepEqual(restoredLpRank.filters.lpRank, {}, 'the URL only carries conditions it actually sent');
 });
 
 test('explore: ALLOWED_COLUMNS matches the lift rules on real entities', () => {
@@ -177,7 +190,7 @@ test('explore: ALLOWED_COLUMNS matches the lift rules on real entities', () => {
 
 test('explore: columns are sanitized to the kind and never empty', () => {
   assert.deepEqual(sanitizeColumns('bnc_family', ['bnc25k.family_total', 'coca2020.hw_rank']), ['bnc25k.family_total']);
-  assert.deepEqual(sanitizeColumns('bnc_family', ['coca2020.hw_rank']), ['bnc25k.family_total', 'bnc25k.family_band']);
+  assert.deepEqual(sanitizeColumns('bnc_family', ['coca2020.hw_rank']), ['bnc25k.family_total']);
   assert.deepEqual(sanitizeColumns('form', ['coca2020.hw_rank', 'coca2020.hw_rank']), ['coca2020.hw_rank']);
 });
 
@@ -207,23 +220,73 @@ test('explore: switching kind drops a sort the new kind cannot produce', () => {
   assert.deepEqual(sortForKind({ by: 'spelling', dir: 'desc' }, 'bnc_family'), { by: 'spelling', dir: 'desc' });
 });
 
-test('explore: switching kind drops ranges the new kind cannot satisfy', () => {
+test('explore: switching kind keeps panel intent but withholds inapplicable ranges from the query', () => {
   const filters = { ...EMPTY_FILTERS, lpRank: { max: 1000 }, hwRank: { max: 5000 }, band: { max: 3 } };
+  const state: ExploreState = { kind: 'form', text: '', textMode: 'prefix', filters, sort: DEFAULT_SORT };
 
-  // Official COCA record rank exists only on the PoS-record kind.
-  assert.deepEqual(filtersForKind(filters, 'coca_headword'), { ...filters, lpRank: {} });
-  assert.deepEqual(filtersForKind(filters, 'coca_lemma_pos'), filters);
+  // Nothing is mutated away: the reader's intent survives kind switches, and the query only
+  // carries conditions this kind can satisfy (Shape Brief §4.1, replacing the drop policy).
+  // On a Form the official record rank is withheld; the headword rank and band still apply.
+  assert.deepEqual(toLexQuery(state).filters, [
+    { type: 'metric_range', metric: 'coca2020.hw_rank', max: 5000 },
+    { type: 'metric_range', metric: 'bnc25k.family_band', max: 3 },
+  ]);
+  assert.deepEqual(inapplicableFilters(filters, 'form'), [
+    { id: 'lpRank', label: '官方排名 ≤1,000', reason: 'COCA 官方排名仅存在于「COCA 词性条目」' },
+  ]);
+
+  // Switching to the kind that owns the rank re-activates both ranges with no user action.
+  assert.deepEqual(toLexQuery({ ...state, kind: 'coca_lemma_pos' }).filters?.slice(0, 2), [
+    { type: 'metric_range', metric: 'coca2020.lp_rank', max: 1000 },
+    { type: 'metric_range', metric: 'coca2020.hw_rank', max: 5000 },
+  ]);
 
   // A derived headword rank never lifts to a family; band is native there and stays.
-  assert.deepEqual(filtersForKind(filters, 'bnc_family'), { ...filters, lpRank: {}, hwRank: {} });
+  const familyState: ExploreState = { ...state, kind: 'bnc_family' };
+  assert.deepEqual(toLexQuery(familyState).filters, [{ type: 'metric_range', metric: 'bnc25k.family_band', max: 3 }]);
+  assert.deepEqual(
+    inapplicableFilters(filters, 'bnc_family').map((item) => item.id),
+    ['lpRank', 'hwRank']
+  );
+});
 
-  // A Form has no official COCA record rank of its own; its headword rank and band still apply.
-  assert.deepEqual(filtersForKind(filters, 'form'), { ...filters, lpRank: {} });
+test('explore: chips list every applicable condition as removable, inapplicable as disabled with a reason', () => {
+  const filters: ExploreFilters = {
+    ...EMPTY_FILTERS,
+    sourcesPresent: ['bnc25k'],
+    cetLevels: ['CET6'],
+    status: ['unrated'],
+    hwRank: { max: 5000 },
+    extra: [{ type: 'in_refs', refs: ['f:work'] }],
+  };
+
+  const chips = filterChips(filters, 'form');
+  assert.deepEqual(
+    chips.map((chip) => chip.label),
+    ['词头排名（计算） ≤5,000', '有 BNC/COCA 25k', 'CET6', '未评', '固定集合（1）']
+  );
+  assert.ok(chips.every((chip) => chip.removable));
+  assert.ok(chips.every((chip) => !chip.disabled));
+
+  // The same panel state as a family query marks the headword rank inert — text reason, not colour.
+  const familyChips = filterChips(filters, 'bnc_family');
+  const rank = familyChips.find((chip) => chip.id === 'hwRank');
+  assert.equal(rank?.disabled, true);
+  assert.match(rank?.reason ?? '', /词族/);
+
+  // Removing a chip clears exactly that condition; an unknown id changes nothing.
+  assert.deepEqual(removeFilterChip(filters, 'extra:0').extra, []);
+  assert.deepEqual(removeFilterChip(filters, 'cet:CET6').cetLevels, []);
+  assert.deepEqual(removeFilterChip(filters, 'hwRank').hwRank, {});
+  assert.equal(removeFilterChip(filters, 'nonsense'), filters);
 });
 
 test('explore: active facet counting and value formatting', () => {
-  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, cetLevels: ['CET4'], band: { max: 3 }, multiPos: false }), 3);
-  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, extra: [{ type: 'in_refs', refs: [] }] }), 1);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, cetLevels: ['CET4'], band: { max: 3 }, multiPos: false }, 'form'), 3);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, extra: [{ type: 'in_refs', refs: [] }] }, 'form'), 1);
+  // An inapplicable range no longer counts as active for the badge.
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, lpRank: { max: 1000 } }, 'form'), 0);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, lpRank: { max: 1000 } }, 'coca_lemma_pos'), 1);
 
   assert.equal(formatMetricValue('coca2020.lp_freq', 854095), '854,095');
   assert.equal(formatMetricValue('coca2020.lp_rank', 115), '#115');

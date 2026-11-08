@@ -73,15 +73,44 @@ export const ALLOWED_COLUMNS: Record<EntityKind, readonly MetricId[]> = {
   cet_entry: ['coca2020.hw_rank', 'coca2020.hw_freq_sum', 'bnc25k.family_band'],
 };
 
-/** Two or three columns per kind: the signal a reader needs first, without a wall of numbers. */
+/** Curated roster density per kind (Brief §5.4): the identity anchor leads separately; these are the remaining default columns. */
 export const DEFAULT_COLUMNS: Record<EntityKind, MetricId[]> = {
-  form: ['coca2020.hw_rank', 'bnc25k.member_freq'],
-  coca_headword: ['coca2020.hw_rank', 'coca2020.hw_freq_sum'],
-  coca_lemma_pos: ['coca2020.lp_rank', 'coca2020.lp_freq'],
-  bnc_family: ['bnc25k.family_total', 'bnc25k.family_band'],
-  bnc_member: ['bnc25k.member_freq', 'bnc25k.member_share_of_family'],
-  cet_entry: ['coca2020.hw_rank', 'bnc25k.family_band'],
+  form: ['coca2020.hw_freq_sum', 'bnc25k.member_freq', 'bnc25k.family_band'],
+  coca_headword: ['coca2020.hw_freq_sum', 'coca2020.hw_best_lp_rank', 'coca2020.hw_pos_count'],
+  coca_lemma_pos: ['coca2020.lp_freq', 'coca2020.lp_share_of_headword', 'coca2020.hw_rank'],
+  bnc_family: ['bnc25k.family_total'],
+  bnc_member: ['bnc25k.member_share_of_family', 'bnc25k.family_band', 'coca2020.hw_rank'],
+  cet_entry: ['coca2020.hw_rank', 'coca2020.hw_freq_sum', 'bnc25k.family_band'],
 };
+
+/**
+ * The kind's identity column (Shape Brief §5.4, the first-column anchor): the natural rank or size the roster
+ * is scanned by, always requested and rendered as the leading column in its own ink voice
+ * (official red for official ranks/levels, pencil gray for computed ones). `null` = the kind has
+ * no metric anchor; the CET level badge takes its place. The anchor is not user-removable.
+ */
+export function anchorMetricFor(kind: EntityKind): MetricId | null {
+  switch (kind) {
+    case 'form':
+    case 'coca_headword':
+      return 'coca2020.hw_rank';
+    case 'coca_lemma_pos':
+      return 'coca2020.lp_rank';
+    case 'bnc_family':
+      return 'bnc25k.family_band';
+    case 'bnc_member':
+      return 'bnc25k.member_freq';
+    case 'cet_entry':
+      return null;
+  }
+}
+
+/** Column request for the engine: the anchor first, then the reader's chosen data columns. */
+export function requestColumnsFor(kind: EntityKind, columns: readonly MetricId[]): MetricId[] {
+  const anchor = anchorMetricFor(kind);
+  const data = columns.filter((metric) => metric !== anchor);
+  return anchor ? [anchor, ...data] : [...data];
+}
 
 /** Keeps a column choice inside the kind's allowed set and non-empty. */
 export function sanitizeColumns(kind: EntityKind, columns: readonly MetricId[]): MetricId[] {
@@ -195,16 +224,21 @@ function rangeFilter(metric: MetricId, range: RangeFilter): QueryFilter | null {
   return filter;
 }
 
-export function toQueryFilters(filters: ExploreFilters): QueryFilter[] {
+export function toQueryFilters(filters: ExploreFilters, kind: EntityKind): QueryFilter[] {
   const out: QueryFilter[] = [];
   for (const source of filters.sourcesPresent) out.push({ type: 'source_presence', source, present: true });
   for (const source of filters.sourcesAbsent) out.push({ type: 'source_presence', source, present: false });
   if (filters.pos.length > 0) out.push({ type: 'coca_pos', pos: [...filters.pos] });
 
-  const lp = rangeFilter('coca2020.lp_rank', filters.lpRank);
-  if (lp) out.push(lp);
-  const hw = rangeFilter('coca2020.hw_rank', filters.hwRank);
-  if (hw) out.push(hw);
+  // Ranges the kind cannot satisfy are withheld here, not mutated away from the panel state.
+  if (kind === 'coca_lemma_pos') {
+    const lp = rangeFilter('coca2020.lp_rank', filters.lpRank);
+    if (lp) out.push(lp);
+  }
+  if (kind !== 'bnc_family') {
+    const hw = rangeFilter('coca2020.hw_rank', filters.hwRank);
+    if (hw) out.push(hw);
+  }
   const band = rangeFilter('bnc25k.family_band', filters.band);
   if (band) out.push(band);
 
@@ -230,7 +264,7 @@ export function toLexQuery(state: ExploreState, page?: { offset: number; limit: 
   const query: LexQuery = { kind: state.kind };
   const text = state.text.trim();
   if (text.length > 0) query.text = { q: text, mode: state.textMode };
-  const filters = toQueryFilters(state.filters);
+  const filters = toQueryFilters(state.filters, state.kind);
   if (filters.length > 0) query.filters = filters;
   query.sort = [state.sort];
   if (page) query.page = page;
@@ -454,24 +488,158 @@ export function sortForKind(sort: SortSpec, kind: EntityKind): SortSpec {
   return ALLOWED_COLUMNS[kind].includes(sort.metric) ? sort : DEFAULT_SORT;
 }
 
-/**
- * Switching kind keeps the scope but drops a rank range the new kind cannot satisfy: an official
- * COCA record rank only exists on `coca_lemma_pos`, and a COCA headword rank never lifts to a
- * family. Keeping them would show an empty table for a reason the panel cannot explain.
- */
-export function filtersForKind(filters: ExploreFilters, kind: EntityKind): ExploreFilters {
-  const next: ExploreFilters = { ...filters };
-  if (kind !== 'coca_lemma_pos' && !isRangeEmpty(filters.lpRank)) next.lpRank = {};
-  if (kind === 'bnc_family' && !isRangeEmpty(filters.hwRank)) next.hwRank = {};
-  return next;
+// ---------------------------------------------------------------------------
+// Kind applicability (Shape Brief §4.1): filters the current kind cannot satisfy
+// stay in panel state and are shown as disabled chips with a reason; they are
+// NOT sent to the engine. Switching back to a kind that can use them re-activates
+// them automatically, so the reader's intent is never silently destroyed.
+// ---------------------------------------------------------------------------
+
+export interface InapplicableFilter {
+  /** Stable id used by chip removal (also the panel field key). */
+  id: string;
+  label: string;
+  /** Why the condition is inert on this kind; the chip renders it as text, not colour alone. */
+  reason: string;
 }
 
-/** Counts the facets a reader has turned on (used by the panel badge and the mobile button). */
-export function countActiveFilters(filters: ExploreFilters): number {
+/** Only the official COCA record rank exists on `coca_lemma_pos`; a headword rank never lifts to a family. */
+export function inapplicableFilters(filters: ExploreFilters, kind: EntityKind): InapplicableFilter[] {
+  const out: InapplicableFilter[] = [];
+  if (!isRangeEmpty(filters.lpRank) && kind !== 'coca_lemma_pos') {
+    out.push({ id: 'lpRank', label: rangeChipLabel('官方排名', filters.lpRank), reason: 'COCA 官方排名仅存在于「COCA 词性条目」' });
+  }
+  if (!isRangeEmpty(filters.hwRank) && kind === 'bnc_family') {
+    out.push({ id: 'hwRank', label: rangeChipLabel('词头排名（计算）', filters.hwRank), reason: 'COCA 词头排名不会提升到 BNC 词族' });
+  }
+  return out;
+}
+
+function rangeChipLabel(prefix: string, range: RangeFilter): string {
+  const min = range.min !== undefined ? range.min.toLocaleString('en-US') : null;
+  const max = range.max !== undefined ? range.max.toLocaleString('en-US') : null;
+  if (min !== null && max !== null) return `${prefix} ${min}–${max}`;
+  if (max !== null) return `${prefix} ≤${max}`;
+  if (min !== null) return `${prefix} ≥${min}`;
+  return prefix;
+}
+
+/**
+ * Query-bar chips for the current scope: every applicable active condition as a removable chip,
+ * plus the inapplicable ones as disabled chips carrying their reason. Order roughly mirrors
+ * `toQueryFilters`, so chips and the URL never disagree about what is active.
+ */
+export interface FilterChip {
+  id: string;
+  label: string;
+  removable: boolean;
+  disabled: boolean;
+  reason?: string;
+}
+
+export function filterChips(filters: ExploreFilters, kind: EntityKind): FilterChip[] {
+  const inactive: InapplicableFilter[] = inapplicableFilters(filters, kind);
+  const chips: FilterChip[] = [];
+
+  const lp = inactive.find((item) => item.id === 'lpRank');
+  if (lp !== undefined) {
+    chips.push({ id: 'lpRank', label: lp.label, removable: true, disabled: true, reason: lp.reason });
+  } else if (!isRangeEmpty(filters.lpRank)) {
+    chips.push({ id: 'lpRank', label: rangeChipLabel('官方排名', filters.lpRank), removable: true, disabled: false });
+  }
+
+  const hw = inactive.find((item) => item.id === 'hwRank');
+  if (hw !== undefined) {
+    chips.push({ id: 'hwRank', label: hw.label, removable: true, disabled: true, reason: hw.reason });
+  } else if (!isRangeEmpty(filters.hwRank)) {
+    chips.push({ id: 'hwRank', label: rangeChipLabel('词头排名（计算）', filters.hwRank), removable: true, disabled: false });
+  }
+
+  for (const source of filters.sourcesPresent) {
+    chips.push({ id: `present:${source}`, label: `有 ${SOURCE_LABELS[source]}`, removable: true, disabled: false });
+  }
+  for (const source of filters.sourcesAbsent) {
+    chips.push({ id: `absent:${source}`, label: `无 ${SOURCE_LABELS[source]}`, removable: true, disabled: false });
+  }
+  for (const pos of filters.pos) {
+    chips.push({ id: `pos:${pos}`, label: `词性 ${pos}`, removable: true, disabled: false });
+  }
+  if (!isRangeEmpty(filters.band)) {
+    chips.push({ id: 'band', label: rangeChipLabel('频段', filters.band), removable: true, disabled: false });
+  }
+  for (const level of filters.cetLevels) {
+    chips.push({ id: `cet:${level}`, label: level, removable: true, disabled: false });
+  }
+  for (const status of filters.status) {
+    chips.push({
+      id: `status:${status}`,
+      label: filters.statusResolution === 'own' ? `${STATUS_LABELS[status]}（仅显式）` : STATUS_LABELS[status],
+      removable: true,
+      disabled: false,
+    });
+  }
+  for (const cls of filters.spellingClasses) {
+    chips.push({ id: `spelling:${cls}`, label: `拼写 ${SPELLING_CLASS_LABELS[cls]}`, removable: true, disabled: false });
+  }
+  if (filters.multiPos !== null) {
+    chips.push({ id: 'multiPos', label: filters.multiPos ? '多词性 是' : '多词性 否', removable: true, disabled: false });
+  }
+  if (filters.multiFamily !== null) {
+    chips.push({ id: 'multiFamily', label: filters.multiFamily ? '多词族 是' : '多词族 否', removable: true, disabled: false });
+  }
+  for (const [index, extra] of filters.extra.entries()) {
+    const label = extra.type === 'in_refs' ? `固定集合（${extra.refs.length}）` : extra.type;
+    // Exiting a linked/projected set must be an explicit, findable action (Brief §4.1).
+    chips.push({ id: `extra:${index}`, label, removable: true, disabled: false });
+  }
+  return chips;
+}
+
+/** Removes one chip's condition; unknown ids return the filters unchanged. */
+export function removeFilterChip(filters: ExploreFilters, id: string): ExploreFilters {
+  const [head, tail] = splitChipId(id);
+  switch (head) {
+    case 'lpRank':
+      return { ...filters, lpRank: {} };
+    case 'hwRank':
+      return { ...filters, hwRank: {} };
+    case 'band':
+      return { ...filters, band: {} };
+    case 'present':
+      return { ...filters, sourcesPresent: filters.sourcesPresent.filter((item) => item !== tail) };
+    case 'absent':
+      return { ...filters, sourcesAbsent: filters.sourcesAbsent.filter((item) => item !== tail) };
+    case 'pos':
+      return { ...filters, pos: filters.pos.filter((item) => item !== tail) };
+    case 'cet':
+      return { ...filters, cetLevels: filters.cetLevels.filter((item) => item !== tail) };
+    case 'status':
+      return { ...filters, status: filters.status.filter((item) => item !== tail) };
+    case 'spelling':
+      return { ...filters, spellingClasses: filters.spellingClasses.filter((item) => item !== tail) };
+    case 'multiPos':
+      return { ...filters, multiPos: null };
+    case 'multiFamily':
+      return { ...filters, multiFamily: null };
+    case 'extra':
+      return { ...filters, extra: filters.extra.filter((_, index) => index !== Number(tail)) };
+    default:
+      return filters;
+  }
+}
+
+function splitChipId(id: string): [string, string] {
+  const index = id.indexOf(':');
+  return index === -1 ? [id, ''] : [id.slice(0, index), id.slice(index + 1)];
+}
+
+/** Counts the facets a reader has turned on that are active on the current kind. */
+export function countActiveFilters(filters: ExploreFilters, kind: EntityKind): number {
+  const inactive = new Set(inapplicableFilters(filters, kind).map((item) => item.id));
   let count = filters.sourcesPresent.length + filters.sourcesAbsent.length;
   count += filters.pos.length + filters.cetLevels.length + filters.status.length + filters.spellingClasses.length;
-  if (!isRangeEmpty(filters.lpRank)) count += 1;
-  if (!isRangeEmpty(filters.hwRank)) count += 1;
+  if (!inactive.has('lpRank') && !isRangeEmpty(filters.lpRank)) count += 1;
+  if (!inactive.has('hwRank') && !isRangeEmpty(filters.hwRank)) count += 1;
   if (!isRangeEmpty(filters.band)) count += 1;
   if (filters.multiPos !== null) count += 1;
   if (filters.multiFamily !== null) count += 1;

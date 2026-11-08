@@ -7,7 +7,7 @@
  *
  * All labels and relations come from the engine (rows / project); nothing is derived here.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { kindOf, type EntityKind, type EntityRef } from '../../v2/index.ts';
 import type { EngineClient } from '../../v2/worker/client.ts';
@@ -79,9 +79,11 @@ export interface RefDetailProps {
   onClose: () => void;
   onOpenRef: (ref: EntityRef) => void;
   onOpenInExplore: (query: ReturnType<typeof queryForRefs>) => void;
+  /** Host-provided header control (the float/dock pin). Rendered before the close button. */
+  extraHeaderAction?: ReactNode;
 }
 
-export function RefDetail({ client, entityRef, onClose, onOpenRef, onOpenInExplore }: RefDetailProps) {
+export function RefDetail({ client, entityRef, onClose, onOpenRef, onOpenInExplore, extraHeaderAction }: RefDetailProps) {
   const [data, setData] = useState<RefDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,13 +106,19 @@ export function RefDetail({ client, entityRef, onClose, onOpenRef, onOpenInExplo
   const kind = kindOf(entityRef);
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full flex-col"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && extraHeaderAction === undefined) onClose();
+      }}
+    >
       <header className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-4 py-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{KIND_LABELS[kind]}</p>
-          <h2 className="truncate text-lg font-semibold text-[var(--text-primary)]">{data?.label ?? '载入中…'}</h2>
-          <p className="truncate font-mono text-[11px] text-[var(--text-muted)]">{entityRef}</p>
+          <p className="text-[11px] text-[var(--text-muted)]">{KIND_LABELS[kind]}</p>
+          <h2 className="truncate font-serif-lexicon text-2xl font-semibold text-[var(--text-primary)]">{data?.label ?? '载入中…'}</h2>
+          <p className="truncate font-mono-tabular text-[11px] text-[var(--text-muted)]">{entityRef}</p>
         </div>
+        {extraHeaderAction}
         <button type="button" onClick={onClose} className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-hover)]" aria-label="关闭详情">
           <X size={16} />
         </button>
@@ -122,9 +130,9 @@ export function RefDetail({ client, entityRef, onClose, onOpenRef, onOpenInExplo
 
         {data?.groups.map((group) => (
           <section key={group.title}>
-            <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+            <h3 className="mb-1.5 text-[11px] text-[var(--text-muted)]">
               {group.title}
-              <span className="ml-1.5 normal-case text-[var(--text-muted)]">({group.chips.length})</span>
+              <span className="ml-1.5">({group.chips.length})</span>
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {group.chips.map((chip) => (
@@ -132,7 +140,7 @@ export function RefDetail({ client, entityRef, onClose, onOpenRef, onOpenInExplo
                   <button
                     type="button"
                     onClick={() => onOpenRef(chip.ref)}
-                    className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1 text-xs text-[var(--text-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-hover)]"
+                    className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1 font-serif-lexicon text-xs text-[var(--text-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-hover)]"
                   >
                     {chip.label}
                   </button>

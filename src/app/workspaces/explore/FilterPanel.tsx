@@ -6,7 +6,7 @@
  * the desktop aside can apply immediately while the mobile sheet can hold a draft until "apply".
  */
 import type { ReactNode } from 'react';
-import type { CocaPos, LearningStatus } from '../../../v2/index.ts';
+import type { CocaPos, EntityKind, LearningStatus } from '../../../v2/index.ts';
 import { SOURCE_IDS } from '../../../v2/index.ts';
 import {
   CET_LEVELS,
@@ -29,10 +29,14 @@ export interface FilterPanelProps {
   onChange: (next: ExploreFilters) => void;
   /** Number of active facets, shown next to the panel title. */
   activeCount: number;
+  /** Current kind: ranges it cannot satisfy are shown disabled with a written reason. */
+  kind: EntityKind;
 }
 
-export function FilterPanel({ value, onChange, activeCount }: FilterPanelProps) {
+export function FilterPanel({ value, onChange, activeCount, kind }: FilterPanelProps) {
   const patch = (partial: Partial<ExploreFilters>): void => onChange({ ...value, ...partial });
+  const lpOff = kind !== 'coca_lemma_pos';
+  const hwOff = kind === 'bnc_family';
 
   return (
     <div className="space-y-1 text-xs">
@@ -99,6 +103,8 @@ export function FilterPanel({ value, onChange, activeCount }: FilterPanelProps) 
             onChange={(range) => patch({ lpRank: range })}
             placeholderMin="1"
             placeholderMax="1000"
+            disabled={lpOff}
+            disabledReason={lpOff ? '官方排名仅存在于「COCA 词性条目」，此处保留但不生效' : undefined}
           />
           <RangeRow
             label="COCA 词头排名（计算）"
@@ -106,6 +112,8 @@ export function FilterPanel({ value, onChange, activeCount }: FilterPanelProps) 
             onChange={(range) => patch({ hwRank: range })}
             placeholderMin="1"
             placeholderMax="5000"
+            disabled={hwOff}
+            disabledReason={hwOff ? '词头排名不会提升到 BNC 词族，此处保留但不生效' : undefined}
           />
           <RangeRow label="BNC 词族频段" range={value.band} onChange={(range) => patch({ band: range })} placeholderMin="1" placeholderMax="25" />
         </div>
@@ -211,31 +219,40 @@ function RangeRow({
   onChange,
   placeholderMin,
   placeholderMax,
+  disabled = false,
+  disabledReason,
 }: {
   label: string;
   range: RangeFilter;
   onChange: (range: RangeFilter) => void;
   placeholderMin: string;
   placeholderMax: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[var(--text-secondary)]">{label}</span>
-      <div className="flex items-center gap-1">
-        <NumberInput
-          value={range.min}
-          placeholder={placeholderMin}
-          ariaLabel={`${label} 最小值`}
-          onCommit={(raw) => onChange(setRange(range, 'min', raw))}
-        />
-        <span className="text-[var(--text-muted)]">–</span>
-        <NumberInput
-          value={range.max}
-          placeholder={placeholderMax}
-          ariaLabel={`${label} 最大值`}
-          onCommit={(raw) => onChange(setRange(range, 'max', raw))}
-        />
+    <div className={disabled ? 'opacity-60' : undefined}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[var(--text-secondary)]">{label}</span>
+        <div className="flex items-center gap-1">
+          <NumberInput
+            value={range.min}
+            placeholder={placeholderMin}
+            ariaLabel={`${label} 最小值`}
+            onCommit={(raw) => onChange(setRange(range, 'min', raw))}
+            disabled={disabled}
+          />
+          <span className="text-[var(--text-muted)]">–</span>
+          <NumberInput
+            value={range.max}
+            placeholder={placeholderMax}
+            ariaLabel={`${label} 最大值`}
+            onCommit={(raw) => onChange(setRange(range, 'max', raw))}
+            disabled={disabled}
+          />
+        </div>
       </div>
+      {disabledReason && <p className="mt-0.5 text-right text-[10px] leading-snug text-[var(--text-muted)]">{disabledReason}</p>}
     </div>
   );
 }
@@ -245,11 +262,13 @@ function NumberInput({
   placeholder,
   ariaLabel,
   onCommit,
+  disabled = false,
 }: {
   value: number | undefined;
   placeholder: string;
   ariaLabel: string;
   onCommit: (raw: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -259,8 +278,9 @@ function NumberInput({
       value={value ?? ''}
       placeholder={placeholder}
       aria-label={ariaLabel}
+      disabled={disabled}
       onChange={(event) => onCommit(event.target.value)}
-      className="w-16 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-1.5 py-1 text-[11px] text-[var(--text-secondary)]"
+      className="w-16 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-1.5 py-1 text-[11px] text-[var(--text-secondary)] disabled:cursor-not-allowed"
     />
   );
 }

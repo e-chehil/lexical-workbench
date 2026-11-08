@@ -1,65 +1,134 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Design tokens — Lexical Workbench 2.0 (Shape Brief §5, direction A「登记册」+C 双墨).
+
+   Voice contract (not colour alone):
+   - official ink (source facts): solid weight, --official red reserved for official
+     ranks / CET levels / errors;
+   - computed pencil (derived): regular text with a literal「（计算）」in the header label;
+   - absent: "--" plus a written source note, never shaped like a zero;
+   - personal ink (learning states / collections): interactive voice with text labels.
+--------------------------------------------------------------------------- */
 @layer base {
   :root {
-    --bg-canvas: #F8FAFC;
-    --bg-surface: #FFFFFF;
-    --bg-elevated: #F1F5F9;
-    --bg-subtle: #E2E8F0;
-    --bg-hover: #F1F5F9;
-    --text-primary: #0F172A;
-    --text-secondary: #334155;
-    --text-muted: #64748B;
-    --border-subtle: #E2E8F0;
-    --border-hairline: #E2E8F0;
-    --border-strong: #CBD5E1;
-    --accent-primary: #2563EB;
-    --accent-hover: #1D4ED8;
-    --accent-soft: #EFF6FF;
-    --accent-primary-soft: #EFF6FF;
+    color-scheme: light;
+
+    /* surfaces: cool paper, not grey-blue */
+    --bg-canvas: #fafaf8;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f4f4f1;
+    --bg-subtle: #ebebe6;
+    --bg-hover: #f1f1ed;
+
+    /* ink */
+    --text-primary: #1c2430;
+    --text-secondary: #3d4654;
+    --text-muted: #6b7380;
+
+    /* lines */
+    --border-subtle: #e5e4de;
+    --border-hairline: #e5e4de;
+    --border-strong: #c9c8c0;
+
+    /* interactive voice */
+    --accent-primary: #3b5bdb;
+    --accent-hover: #2f4ec2;
+    --accent-soft: rgba(59, 91, 219, 0.08);
+    --accent-primary-soft: rgba(59, 91, 219, 0.08);
+
+    /* official voice (source-fact anchors, CET levels, errors) */
+    --official: #b03a2e;
+    --official-soft: rgba(176, 58, 46, 0.08);
+
+    /* personal ink: the five learning states (always paired with a text label) */
+    --st-unrated: #6b7380;
+    --st-unrated-soft: rgba(107, 115, 128, 0.12);
+    --st-queued: #2b6cb0;
+    --st-queued-soft: rgba(43, 108, 176, 0.12);
+    --st-learning: #b7791f;
+    --st-learning-soft: rgba(183, 121, 31, 0.14);
+    --st-mastered: #2f855a;
+    --st-mastered-soft: rgba(47, 133, 90, 0.13);
+    --st-deferred: #6b46c1;
+    --st-deferred-soft: rgba(107, 70, 193, 0.12);
+
+    /* type */
+    --font-ui: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --font-serif: "Source Serif 4", Georgia, Cambria, "Times New Roman", serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 
   .dark {
-    --bg-canvas: #090D16;
-    --bg-surface: #111827;
-    --bg-elevated: #1E293B;
-    --bg-subtle: #1E293B;
-    --bg-hover: rgba(30, 41, 59, 0.7);
-    --text-primary: #F8FAFC;
-    --text-secondary: #CBD5E1;
-    --text-muted: #94A3B8;
-    --border-subtle: #1E293B;
-    --border-hairline: #1E293B;
-    --border-strong: #334155;
-    --accent-primary: #3B82F6;
-    --accent-hover: #2563EB;
-    --accent-soft: rgba(59, 130, 246, 0.14);
-    --accent-primary-soft: rgba(59, 130, 246, 0.14);
+    color-scheme: dark;
+
+    --bg-canvas: #0e1526;
+    --bg-surface: #16203a;
+    --bg-elevated: #1c2846;
+    --bg-subtle: #22304f;
+    --bg-hover: rgba(34, 48, 79, 0.7);
+
+    --text-primary: #f2f4f8;
+    --text-secondary: #c7cdd8;
+    --text-muted: #8f97a6;
+
+    --border-subtle: #22304f;
+    --border-hairline: #22304f;
+    --border-strong: #354468;
+
+    --accent-primary: #6485f0;
+    --accent-hover: #8aa6f5;
+    --accent-soft: rgba(100, 133, 240, 0.14);
+    --accent-primary-soft: rgba(100, 133, 240, 0.14);
+
+    --official: #e08076;
+    --official-soft: rgba(224, 128, 118, 0.12);
+
+    --st-unrated: #8f97a6;
+    --st-unrated-soft: rgba(143, 151, 166, 0.16);
+    --st-queued: #7ca8e8;
+    --st-queued-soft: rgba(124, 168, 232, 0.16);
+    --st-learning: #e2b45c;
+    --st-learning-soft: rgba(226, 180, 92, 0.16);
+    --st-mastered: #6fc493;
+    --st-mastered-soft: rgba(111, 196, 147, 0.16);
+    --st-deferred: #b49ae8;
+    --st-deferred-soft: rgba(180, 154, 232, 0.16);
   }
 
   html,
   body {
     background-color: var(--bg-canvas);
     color: var(--text-primary);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-family: var(--font-ui);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
   }
+
+  ::selection {
+    background-color: rgba(59, 91, 219, 0.16);
+  }
+  .dark ::selection {
+    background-color: rgba(100, 133, 240, 0.28);
+  }
 }
 
+/* Latin headwords: serif voice for the reading layer (headwords are always Latin words). */
 .font-serif-lexicon {
-  font-family: 'Source Serif 4', 'Newsreader', Georgia, Cambria, "Times New Roman", Times, serif;
+  font-family: var(--font-serif);
 }
 
+/* Numerals and refs: tabular mono voice; data and measurement only, never decoration. */
 .font-mono-tabular,
 .tabular-nums {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 .font-mono-code {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .focus-ring:focus-visible {
@@ -81,10 +150,20 @@
   container-type: inline-size;
 }
 
-/* Custom subtle scrollbars */
+/* The roster only takes its roomy min width on md+ canvases; mobile rows fold instead. */
+.lex-table-inner {
+  min-width: 0;
+}
+@container (min-width: 768px) {
+  .lex-table-inner {
+    min-width: var(--table-min-w, 900px);
+  }
+}
+
+/* Custom subtle scrollbars (themed, always visible enough to scroll long lists) */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -92,10 +171,18 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+
+* {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 30%, transparent) transparent;
 }

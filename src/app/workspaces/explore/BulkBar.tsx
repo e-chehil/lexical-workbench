@@ -3,10 +3,12 @@
  *
  * Every action works on learning targets, never on rows: `targetsForRows` reports the aggregates it
  * cannot act on (families need an explicit member choice, entries link several spellings), and the
- * bar says so instead of silently dropping them.
+ * bar says so instead of silently dropping them. Each committed write becomes a visible receipt
+ * (Shape Brief §4.2 "one annotation stroke") with undo backed by `store.undoBatch`;
+ * the per-batch history popover arrives with Phase 3.
  */
 import { useEffect, useState } from 'react';
-import { FolderPlus, Loader2, X } from 'lucide-react';
+import { FolderPlus, Loader2, Undo2, X } from 'lucide-react';
 import type { Collection, EntityRowDTO, LearningStatus, TargetRef } from '../../../v2/index.ts';
 import { CollectionError, DexieCollections } from '../../../v2/store/collections.ts';
 import type { LexicalWorkbenchDB } from '../../../v2/store/dexieStore.ts';
@@ -15,34 +17,96 @@ import { targetsForRows } from './selection.ts';
 
 type StaticCollection = Extract<Collection, { kind: 'static' }>;
 
+export interface BatchReceipt {
+  batchId: string;
+  targets: number;
+  skipped: number;
+  statusLabel: string;
+  undone: boolean;
+}
+
 export interface BulkBarProps {
   selectedRows: EntityRowDTO[];
+  receipt: BatchReceipt | null;
   busy: boolean;
   message: string | null;
   db: LexicalWorkbenchDB | null;
   onStatus: (status: LearningStatus) => void;
   onClear: () => void;
+  onUndoReceipt: () => void;
+  onDismissReceipt: () => void;
   onMessage: (message: string | null) => void;
 }
 
-export function BulkBar({ selectedRows, busy, message, db, onStatus, onClear, onMessage }: BulkBarProps) {
+export function BulkBar({
+  selectedRows,
+  receipt,
+  busy,
+  message,
+  db,
+  onStatus,
+  onClear,
+  onUndoReceipt,
+  onDismissReceipt,
+  onMessage,
+}: BulkBarProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const mapping = targetsForRows(selectedRows);
 
   return (
     <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-[var(--text-primary)]">已选 {selectedRows.length} 项</span>
-        <button
-          type="button"
-          onClick={onClear}
-          className="flex items-center gap-1 rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--text-muted)] hover:border-[var(--border-strong)]"
+      {receipt && (
+        <p
+          className={`mb-1.5 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${
+            receipt.undone
+              ? 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-muted)]'
+              : 'border-[var(--st-learning)]/30 bg-[var(--st-learning-soft)] text-[var(--text-secondary)]'
+          }`}
         >
-          <X size={11} />
-          清除
-        </button>
-
-        <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+          <span>
+            {receipt.undone
+              ? `已撤销批次 ${receipt.batchId.slice(0, 12)}…`
+              : `已记：${receipt.targets} 个目标 → ${receipt.statusLabel}`}
+            {receipt.skipped > 0 ? ` · ${receipt.skipped} 项聚合已跳过` : ''} · 批次 {receipt.batchId.slice(0, 12)}…
+          </span>
+          {!receipt.undone && (
+            <button
+              type="button"
+              onClick={onUndoReceipt}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-hover)] disabled:opacity-40"
+            >
+              <Undo2 size={11} aria-hidden />
+              撤销这批
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDismissReceipt}
+            aria-label="关闭回执"
+            className="ml-auto rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+          >
+            <X size={12} />
+          </button>
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {selectedRows.length > 0 ? (
+          <>
+            <span className="text-xs font-medium text-[var(--text-primary)]">已选 {selectedRows.length} 项</span>
+            <button
+              type="button"
+              onClick={onClear}
+              className="flex items-center gap-1 rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--text-muted)] hover:border-[var(--border-strong)]"
+            >
+              <X size={11} />
+              清除
+            </button>
+            <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" aria-hidden />
+          </>
+        ) : (
+          <span className="text-xs text-[var(--text-muted)]">最近一次写入</span>
+        )}
 
         {STATUS_KEYS.map((status, index) => (
           <button
@@ -82,10 +146,10 @@ export function BulkBar({ selectedRows, busy, message, db, onStatus, onClear, on
         </div>
 
         {mapping.skipped.length > 0 && (
-          <span className="text-[11px] text-[var(--text-muted)]">{mapping.skipped.length} 项聚合实体已跳过</span>
+          <span className="text-[11px] text-[var(--text-muted)]">{mapping.skipped.length} 项聚合实体已跳过（在其成员词形上标记）</span>
         )}
         {busy && <Loader2 size={13} className="animate-spin text-[var(--accent-primary)]" />}
-        {message && <span className="text-[11px] text-emerald-700 dark:text-emerald-300">{message}</span>}
+        {message && <span className="text-[11px] text-[var(--accent-hover)]">{message}</span>}
         <span className="ml-auto hidden text-[10px] text-[var(--text-muted)] md:inline">
           ↑↓ 移动 · Shift 连选 · 空格选择 · Enter 详情 · 1–5 状态
         </span>
@@ -147,9 +211,9 @@ function CollectionPicker({
   };
 
   return (
-    <div className="absolute bottom-full right-0 z-40 mb-1 w-72 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2 shadow-xl">
+    <div className="absolute bottom-full right-0 z-40 mb-1 w-72 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2 shadow-[0_10px_28px_rgba(15,20,30,0.16)]">
       <div className="flex items-center justify-between px-1 pb-1">
-        <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">加入静态词集</span>
+        <span className="text-[10px] text-[var(--text-muted)]">加入静态词集（保存的目标列表，与投影集合无关）</span>
         <button type="button" onClick={onClose} className="text-[var(--text-muted)]" aria-label="关闭词集选择">
           <X size={12} />
         </button>
@@ -166,7 +230,7 @@ function CollectionPicker({
               <button
                 type="button"
                 onClick={() => void addTo(collection.id)}
-                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               >
                 <span className="truncate">{collection.name}</span>
                 <span className="ml-2 shrink-0 text-[10px] text-[var(--text-muted)]">{collection.targets.length}</span>
