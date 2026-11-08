@@ -44,7 +44,7 @@ npm run dev        # http://localhost:3000
 | `src/v2/worker/` | engine worker + RPC: `engine.worker.ts` (build policy), `loadBrowser.ts` (BASE_URL fetch), `handlers.ts` (pure dispatcher), `registry.ts` (method table, append-only), `client.ts` (main-thread proxy) |
 | `src/v2/index.ts` | public surface — app code imports v2 only from here |
 | `src/v2/node/` | Node-only loaders for tests/scripts — never import in browser code |
-| `src/app/` | new v2 UI (created by tasks T04+) |
+| `src/app/` | new v2 UI: `Root.tsx`, `routing/` (hash codec + Open-in-Explore), `providers/` (Route/Engine/Learning), `shell/`, `search/`, `detail/` |
 | `src/App.tsx`, `src/components/`, `src/data/`, `src/db/` | **legacy v1, frozen** — do not extend; removed in T14 |
 
 ## Domain in one screen

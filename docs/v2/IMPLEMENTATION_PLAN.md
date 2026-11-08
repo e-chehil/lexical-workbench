@@ -28,7 +28,7 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | V2-T01 | Engine DTO builders (rows, form detail, family detail) | — | done (2026-11-08, 9fa4692) |
 | V2-T02 | User data store (Dexie v2) + pure learning store core | — | done (2026-11-08, 0d67e94) |
 | V2-T03 | Engine worker, browser loader, RPC client | T01 | done (2026-11-08, 386207a) |
-| V2-T04 | App shell, routing codec, providers, global search | T02, T03 | todo |
+| V2-T04 | App shell, routing codec, providers, global search | T02, T03 | done (2026-11-08, 30d36e4) |
 | V2-T05 | Explore workspace | T04 | todo |
 | V2-T06 | Detail panels (Form page, Family sheet, entity chips) | T04 | todo |
 | V2-T07 | Family Atlas workspace | T06 | todo |
@@ -220,7 +220,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T04 — App shell, routing, providers, global search
 
-- **Status**: todo
+- **Status**: done (2026-11-08, 30d36e4)
 - **Goal**: New React root with workspace navigation, hash routing carrying `LexQuery` and selected ref,
   engine/store providers, Detail panel host and command-palette search. Legacy app stays reachable at
   `#/legacy`.
@@ -242,6 +242,54 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
   is reachable from it; browser back/forward restores route. Verify with the in-app browser once.
 - **Boundaries**: no workspace content beyond placeholders; no data logic in components.
 - **Report**: route format, screenshots not required; list providers and hooks.
+- **Route format**: `#/<workspace>?q=<base64url LexQuery>&ref=<EntityRef>` where
+  `<workspace>` ∈ explore | corpus | family | study | insights | data (and `legacy`). `q` is the
+  UTF-8 JSON of a `LexQuery` in canonical form (object keys sorted) so equal page states always
+  produce equal URLs; `ref` is percent-encoded because refs contain `|`, `:` and non-ASCII letters.
+  Unknown workspace → Explore; an unreadable `q`/`ref` is dropped rather than throwing.
+- **Done (2026-11-08)**: `routing/codec.ts` (`encodeRoute`, `decodeRoute`, `isSameRoute`,
+  `canonicalJson`, `isLexQuery`), `routing/openInExplore.ts` (`commonKind`, `queryForRefs`,
+  `routeForQuery`, `routeForRefs`), `providers/RouteProvider.tsx` (`useRoute`,
+  `useNavigateIfChanged`), `providers/EngineProvider.tsx` (`useEngine`),
+  `providers/LearningProvider.tsx` (`useLearning`), `shell/*` (`Shell`, `WorkspaceRail`,
+  `MobileTabBar`, `TopBar`, `WorkspacePlaceholder`, `workspaceMeta`), `search/*` (`useSearch`,
+  `SearchPalette`), `detail/*` (`DetailHost`, `RefDetail`), `Root.tsx`; `src/main.tsx` renders
+  `Root`. 10 tests in `src/app/routing/*.test.ts`.
+- **Decisions where the contract was silent**: (1) the palette calls `rows()` with
+  `columns: []` rather than `query()`, because `query()` returns bare refs and the palette must
+  show `index.label`-derived labels without deriving them in the component — `rows()` is the DTO
+  wrapper around the same `runQuery`; (2) `navigate` assigns `location.hash` (one history entry)
+  and `isSameRoute` suppresses duplicate entries, while `replace` uses `history.replaceState` for
+  the initial normalisation; (3) `DetailHost` is route-driven, so opening an entity is linkable and
+  browser back closes the panel; (4) the learning provider pushes the full snapshot on every
+  committed change and after `ready()`, and treats IndexedDB failure as a banner (browsing must not
+  depend on writable storage); (5) `RefDetail` is a deliberately minimal view (label, kind,
+  cross-source chips, "open in Explore") that T06 replaces — it exists because T05's spec refers to
+  a "minimal ref view" when T06 is absent; (6) engine error messages stay English (adapter
+  diagnostics do too); the shell shows them verbatim inside a localised frame.
+- **Measured / verified in Chromium (`npm run dev`, viewport 575 px + a forced desktop rail)**:
+  shell ready in 711–888 ms with `coca2020 · bnc25k · cet2016` and 6 info diagnostics; learning
+  store connected (Dexie) and a real `apply(['f:work','lp:work|noun'], mastered)` became visible to
+  worker queries (`learning_status` filter 0 → `['f:work']`, `formDetail('f:work').status` mastered
+  own, noun record mastered own), then `undoBatch` brought it back to 0 — so the store → worker sync
+  path is real, not assumed. Search `went` → 1 hit (Form `went`), its BNC chip `go` → family `go`
+  with 13 members; back/forward restored both routes; typing `wo` then `went` quickly left only the
+  `went` result (stale response dropped); `Ctrl+K` opened and `Escape` closed the palette; a deep
+  link `#/family?q=…&ref=bnc25k%3Afam%3Acaf%C3%A9` decoded with `café` intact. Removing
+  `public/data/coca_freq.json` produced the error screen
+  `[coca2020] invalid JSON: Unexpected token '<' …` with a retry button; restoring the file and
+  clicking 重新构建 brought the shell back. Production build under `GITHUB_PAGES=true` +
+  `vite preview --base=/lexical-workbench/`: worker `assets/engine.worker-*.js` (44.2 kB) and data
+  (`/lexical-workbench/data/coca_freq.json`) load from the sub-path, the shell becomes ready in
+  888 ms, and the legacy app is only fetched (`App-*.js`, 288 kB) when `#/legacy` is visited.
+- **Handoff for T05**: use `useRoute().navigate` + `openInExplore` for every set; `useEngine()`
+  gives `{client,status,ready,error,retry}`; the Explore page should render
+  `WorkspacePlaceholder`'s slot, and `DetailHost`/`RefDetail` are placeholders T06 replaces.
+  Search uses `rows()` (labels) — reuse `useSearch` instead of querying per component.
+- **Open issue (not T04 scope)**: the browser loader accepts any HTTP 200 body, so a missing
+  *text* source served as the SPA fallback HTML would be parsed as one bogus CET entry; the JSON
+  source fails loudly. A content-type/first-line guard belongs in `worker/loadBrowser.ts` (T03
+  file) and is recorded here rather than patched from an app task.
 
 ## V2-T05 — Explore workspace
 
@@ -393,4 +441,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T04
+NEXT_TASK: V2-T05
