@@ -27,7 +27,7 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | V2-T00 | Architecture freeze, COCA vertical slice, audit (this round) | — | done (2026-11-08) |
 | V2-T01 | Engine DTO builders (rows, form detail, family detail) | — | done (2026-11-08, 9fa4692) |
 | V2-T02 | User data store (Dexie v2) + pure learning store core | — | done (2026-11-08, 0d67e94) |
-| V2-T03 | Engine worker, browser loader, RPC client | T01 | todo |
+| V2-T03 | Engine worker, browser loader, RPC client | T01 | done (2026-11-08, 386207a) |
 | V2-T04 | App shell, routing codec, providers, global search | T02, T03 | todo |
 | V2-T05 | Explore workspace | T04 | todo |
 | V2-T06 | Detail panels (Form page, Family sheet, entity chips) | T04 | todo |
@@ -155,7 +155,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T03 — Engine worker, loader, RPC client
 
-- **Status**: todo
+- **Status**: done (2026-11-08, 386207a)
 - **Goal**: Build the `LexicalIndex` in a Web Worker from `public/data/*` and expose
   `LexicalEngineApi` to the main thread.
 - **Depends on**: T01.
@@ -183,6 +183,40 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 - **Acceptance**: tests pass; `npm run build` emits a separate worker chunk; lint/test/build green.
 - **Boundaries**: worker must not import React, Dexie or legacy code.
 - **Report**: chunk names/sizes from build output, measured `ready()` time in `npm run dev` (console).
+- **Done (2026-11-08)**: `worker/handlers.ts` (`createEngineHandlers`, `MutableLearningState`,
+  `EngineError`, `serializeError`, `dispatchMessage`), `worker/registry.ts` (`ENGINE_METHODS`,
+  `CONTROL_METHODS`, `isEngineMethod`, `isControlMethod`, `assembleHandlers`),
+  `worker/loadBrowser.ts` (`SOURCE_FILES`, `resolvePublicUrl`, `loadSourceTexts`,
+  `buildIndexFromTexts`, `SourceLoadError`), `worker/engine.worker.ts`
+  (`createEngineWorkerRuntime`, `attachEngineWorker`), `worker/client.ts` (`EngineClient`,
+  `EngineClientError`, `createEngineClient`); 20 tests in `src/v2/tests/worker.test.ts`.
+  Decisions where the contract was silent: (1) builds are serialised through one FIFO queue and
+  concurrent `ready()`/`query` calls share a single build (verified: three parallel calls report
+  the same `buildMs`); (2) a failed build is not cached, so the next request retries rather than
+  leaving the session broken; (3) `setCustomSource` builds first and commits the override only on
+  success, so a rejected payload leaves the previous index in service, and the learning state
+  lives outside the build so `syncLearning` survives a rebuild; (4) unknown methods are answered
+  before any build; (5) a source that parses to zero units is refused at the load boundary
+  (`SourceFormatError`) — note the COCA adapter itself accepts an empty array today, which
+  deviates from the adapter contract and should be fixed in `sources/` by a later task;
+  (6) `alignment()` is memoised per index; (7) engine error messages are English (like adapter
+  diagnostics) and are localised by the UI layer later.
+  **Measured (real data, Chromium; `npm run dev` and a GitHub Pages-base production build)**:
+  cold `ready()` 720–1069 ms (`buildMs` in the worker, fetch + parse + build), three concurrent
+  calls → one build; full sorted 95k-form page (200 rows) 266–316 ms end-to-end; `rows()`
+  69–127 ms; `formDetail` 0.7–0.8 ms; `familyDetail` 2.2–3.3 ms; `alignment()` 186–222 ms first
+  call, 0.3–0.9 ms cached; custom-source rebuild 496–520 ms. Main thread: `longtask` count 0 and
+  timer-loop median 4.2–4.6 ms during the cold start (max 6.1 ms in the production run; the one
+  789 ms outlier in a dev run came from hidden-tab timer throttling, not from main-thread work).
+  Main-thread heap +0.1–0.4 MB across the whole sequence (the index lives in the worker; the
+  worker heap is not observable from page JS). Production build emits
+  `assets/engine.worker-<hash>.js` (44.1 kB) as a separate chunk with the worker URL resolved
+  through the deployment base (`/lexical-workbench/assets/...`); because no app code imports
+  `client.ts` yet, the chunk appears once T04 wires the shell.
+- **Handoff for T04**: import `src/v2/worker/client.ts` directly (it is not re-exported from
+  `src/v2/index.ts` because it references `new Worker`), call `createEngineClient()` once in a
+  provider, and use `ready()` for the loading state. `setCustomSource` is a worker control method
+  until T13 adds it to `LexicalEngineApi`; `plan` rejects with `code: 'not_implemented'` until T09.
 
 ## V2-T04 — App shell, routing, providers, global search
 
@@ -359,4 +393,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T03
+NEXT_TASK: V2-T04
