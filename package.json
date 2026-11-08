@@ -9,7 +9,10 @@
     "build:gh-pages": "GITHUB_PAGES=true vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/data/parser.test.ts src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts",
+    "test:v2": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts",
+    "audit:v2": "tsx scripts/audit-v2.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
