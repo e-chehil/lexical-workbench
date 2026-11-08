@@ -17,7 +17,7 @@ export function WorkspacePlaceholder({ workspace, route }: WorkspacePlaceholderP
   const Icon = meta.icon;
 
   return (
-    <section className="mx-auto max-w-3xl px-6 py-10">
+    <section className="mx-auto w-full max-w-3xl overflow-y-auto px-6 py-10">
       <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6">
         <div className="mb-4 flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-hover)]">

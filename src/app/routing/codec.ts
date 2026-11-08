@@ -16,10 +16,12 @@
  */
 import {
   ENTITY_KINDS,
+  METRICS,
   parseRef,
   type EntityKind,
   type EntityRef,
   type LexQuery,
+  type MetricId,
   type QueryFilter,
   type SortSpec,
 } from '../../v2/index.ts';
@@ -159,17 +161,22 @@ export function isLexQuery(value: unknown): value is LexQuery {
   }
   if (value.aggregates !== undefined) {
     if (!Array.isArray(value.aggregates)) return false;
-    if (!value.aggregates.every((a) => isRecord(a) && typeof a.metric === 'string' && typeof a.op === 'string')) return false;
+    if (!value.aggregates.every((a) => isRecord(a) && isMetricId(a.metric) && typeof a.op === 'string')) return false;
   }
   return true;
+}
+
+/** A metric id is only valid when the registry knows it; a typo must not reach a renderer. */
+function isMetricId(value: unknown): value is MetricId {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(METRICS, value);
 }
 
 function isFilterPayloadValid(filter: QueryFilter): boolean {
   switch (filter.type) {
     case 'metric_range':
-      return typeof filter.metric === 'string';
+      return isMetricId(filter.metric);
     case 'metric_present':
-      return typeof filter.metric === 'string' && typeof filter.present === 'boolean';
+      return isMetricId(filter.metric) && typeof filter.present === 'boolean';
     case 'source_presence':
       return typeof filter.source === 'string' && typeof filter.present === 'boolean';
     case 'coca_pos':
@@ -191,7 +198,7 @@ function isFilterPayloadValid(filter: QueryFilter): boolean {
 function isSortSpec(value: unknown): value is SortSpec {
   if (!isRecord(value)) return false;
   if (value.dir !== 'asc' && value.dir !== 'desc') return false;
-  if (value.by === 'metric') return typeof value.metric === 'string';
+  if (value.by === 'metric') return isMetricId(value.metric);
   return value.by === 'spelling';
 }
 

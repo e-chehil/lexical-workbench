@@ -20,6 +20,7 @@ import { TopBar } from './TopBar.tsx';
 import { WorkspacePlaceholder } from './WorkspacePlaceholder.tsx';
 import { WorkspaceRail } from './WorkspaceRail.tsx';
 import { WORKSPACE_META } from './workspaceMeta.ts';
+import { ExploreWorkspace } from '../workspaces/explore/ExploreWorkspace.tsx';
 
 export function Shell() {
   const { route, navigate } = useRoute();
@@ -72,7 +73,11 @@ export function Shell() {
     navigate(next);
   }, [navigate, route]);
 
-  const content = useMemo(() => <WorkspacePlaceholder workspace={workspace} route={route} />, [workspace, route]);
+  // Explore is the first real workspace (T05); the rest stay placeholders until their tasks.
+  const content = useMemo(
+    () => (workspace === 'explore' ? <ExploreWorkspace /> : <WorkspacePlaceholder workspace={workspace} route={route} />),
+    [workspace, route]
+  );
 
   if (status === 'loading') {
     return (
@@ -106,7 +111,7 @@ export function Shell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg-canvas)]">
+    <div className="flex h-dvh min-h-0 bg-[var(--bg-canvas)]">
       <WorkspaceRail
         active={workspace}
         engineStatus={status}
@@ -137,7 +142,7 @@ export function Shell() {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 overflow-y-auto">{content}</main>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{content}</main>
       </div>
 
       <DetailHost

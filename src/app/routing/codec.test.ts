@@ -137,7 +137,12 @@ test('codec: query validation accepts the protocol and rejects wrong shapes', ()
   assert.ok(!isLexQuery({ kind: 'form', text: { q: 'x', mode: 'fuzzy' } }));
   assert.ok(!isLexQuery({ kind: 'form', text: { mode: 'exact' } }));
   assert.ok(!isLexQuery({ kind: 'form', filters: [{ type: 'unknown_filter' }] }));
-  assert.ok(!isLexQuery({ kind: 'form', sort: [{ by: 'metric', dir: 'asc' }] }));
+  assert.ok(!isLexQuery({ kind: 'form', sort: [{ by: 'metric', dir: 'asc' }] }), 'metric sort needs an id');
+  // An id the registry does not know would throw inside a label renderer, so it is refused here.
+  assert.ok(!isLexQuery({ kind: 'form', sort: [{ by: 'metric', metric: 'coca2020.hp_rank', dir: 'asc' }] }));
+  assert.ok(!isLexQuery({ kind: 'form', filters: [{ type: 'metric_range', metric: 'nope.metric', max: 5 }] }));
+  assert.ok(!isLexQuery({ kind: 'form', aggregates: [{ metric: 'nope.metric', op: 'sum' }] }));
+  assert.ok(isLexQuery({ kind: 'form', sort: [{ by: 'metric', metric: 'coca2020.hw_rank', dir: 'asc' }] }));
   assert.ok(!isLexQuery({ kind: 'form', page: { offset: -1, limit: 10 } }));
   assert.ok(!isLexQuery({ kind: 'form', page: { offset: 0, limit: 1.5 } }));
   assert.ok(!isLexQuery([]));
