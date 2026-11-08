@@ -25,7 +25,7 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | ID | Title | Depends on | Status |
 | --- | --- | --- | --- |
 | V2-T00 | Architecture freeze, COCA vertical slice, audit (this round) | — | done (2026-11-08) |
-| V2-T01 | Engine DTO builders (rows, form detail, family detail) | — | todo |
+| V2-T01 | Engine DTO builders (rows, form detail, family detail) | — | done (2026-11-08, 9fa4692) |
 | V2-T02 | User data store (Dexie v2) + pure learning store core | — | todo |
 | V2-T03 | Engine worker, browser loader, RPC client | T01 | todo |
 | V2-T04 | App shell, routing codec, providers, global search | T02, T03 | todo |
@@ -46,7 +46,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T01 — Engine DTO builders
 
-- **Status**: todo
+- **Status**: done (2026-11-08, 9fa4692)
 - **Goal**: Pure functions that turn index + learning state into the DTOs of `src/v2/contracts.ts`, so
   the worker and UI never assemble rows themselves.
 - **Depends on**: —
@@ -85,6 +85,18 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 - **Acceptance**: tests pass; lint/test/build green.
 - **Boundaries**: no changes to `lexicalIndex.ts`, `query.ts`, `contracts.ts` shapes. No React.
 - **Report**: functions added, test names, any DTO field you found ambiguous.
+- **Done (2026-11-08)**: `src/v2/engine/dto.ts` exports `metricCell`, `buildRows`, `rowBadges`,
+  `buildFormDetail`, `buildFamilyDetail` (re-exported from `src/v2/index.ts`); 12 real-data tests in
+  `src/v2/tests/dto.test.ts`; `test` / `test:v2` include the new file. Decisions taken where the
+  contract was silent: (1) `EntityRowDTO.formRef` is filled only for single-Form kinds
+  (`form`, `coca_headword`, `coca_lemma_pos`, `bnc_member`); `bnc_family` and `cet_entry` → null,
+  because one entry can link several spellings. (2) `EntityRowDTO.status` is null when no learning
+  state is synchronised, otherwise `defaultTargetFor` + `resolveEffectiveStatus`. (3)
+  `FamilyDetailDTO.progress.formsMastered/formsTotal` count distinct member Forms by effective Form
+  status, so a mastered PoS record does not count as a mastered form. (4) `multi_pos`/`multi_family`
+  badges mirror the query filters, which project through the Form, so aggregate rows can carry them.
+  Cost observation: `buildRows` adds ≈15–50 ms per 200 rows on kind `form`; `runQuery`'s full-match
+  sort (≈370 ms over 94 954 forms) dominates and was left unchanged.
 
 ## V2-T02 — User data store
 
@@ -324,4 +336,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T01
+NEXT_TASK: V2-T02

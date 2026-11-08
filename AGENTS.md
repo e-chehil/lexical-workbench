@@ -37,7 +37,7 @@ npm run dev        # http://localhost:3000
 | `docs/v2/DATA_AUDIT.md` (+ `data-audit.generated.json`) | Real data facts and numbers |
 | `src/v2/domain/` | ids, entity types, metric registry |
 | `src/v2/sources/` | one adapter per source |
-| `src/v2/engine/` | `LexicalIndex`, query protocol, projection, alignment |
+| `src/v2/engine/` | `LexicalIndex`, query protocol, projection, alignment, `dto.ts` (row / form / family DTO builders for the worker and UI) |
 | `src/v2/learning/` | learning targets, effective status, coverage |
 | `src/v2/contracts.ts` | DTO / worker / store / planner contracts (types for upcoming tasks) |
 | `src/v2/index.ts` | public surface — app code imports v2 only from here |
