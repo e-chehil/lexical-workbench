@@ -9,3 +9,4 @@ export { LexicalIndex, buildLexicalIndex, type SourceSnapshots } from './engine/
 export * from './engine/query.ts';
 export * from './engine/alignment.ts';
 export * from './learning/model.ts';
+export type * from './contracts.ts';

@@ -126,6 +126,22 @@ export function formTargetOfLemmaPos(target: TargetRef): TargetRef {
   return `f:${p.parts[0]}`;
 }
 
+/**
+ * Resolves a learning target back to the entity it denotes in the current index:
+ * `f:<key>` → the Form; `lp:<key>|<pos>` → the COCA record (raw spelling restored, e.g. TRUE).
+ * Returns null when the current sources do not contain it (the record is kept, shown as orphan).
+ */
+export function targetEntityRef(index: LexicalIndex, target: TargetRef): EntityRef | null {
+  const p = parseRef(target);
+  if (p.kind === 'form') return index.forms.has(target) ? target : null;
+  if (p.kind !== 'lemma_pos_target') return null;
+  const [key, pos] = p.parts;
+  const hwRef = index.forms.get(refs.form(key))?.cocaHeadwordRef;
+  if (!hwRef) return null;
+  const lp = index.cocaHeadwords.get(hwRef)!.lemmaPosRefs.find((r) => index.cocaRecords.get(r)!.pos === pos);
+  return lp ?? null;
+}
+
 export function resolveEffectiveStatus(reader: LearningStateReader, target: TargetRef): EffectiveStatus {
   const own = reader.get(target);
   if (own) return { status: own.status, origin: 'own', from: target };

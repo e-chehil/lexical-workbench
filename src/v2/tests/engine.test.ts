@@ -17,6 +17,7 @@ import {
   defaultTargetFor,
   posBreakdown,
   resolveEffectiveStatus,
+  targetEntityRef,
   type LearningRecord,
 } from '../learning/model.ts';
 
@@ -197,6 +198,9 @@ test('learning model: headword-level default, PoS refinement, form-level and fam
     ]
   );
   assert.equal(resolveEffectiveStatus(state, refs.lemmaPosTarget('running', 'noun')).origin, 'default');
+  assert.equal(targetEntityRef(index, 'lp:true|adjective'), 'coca2020:lp:TRUE|adjective');
+  assert.equal(targetEntityRef(index, 'lp:running|verb'), null);
+  assert.equal(targetEntityRef(index, 'f:went'), 'f:went');
 
   const cov = computeCocaWeightedCoverage(index, state, { maxRank: 1000 });
   assert.equal(cov.numerator, 456169, 'only work-noun is mastered among top-1000 records');
