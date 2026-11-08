@@ -5,7 +5,6 @@
  *   `#/<workspace>`                        workspace, no query, no selection
  *   `#/<workspace>?q=<base64url LexQuery>` a list state that can be shared and revisited
  *   `#/<workspace>?ref=<EntityRef>`        one selected entity (Detail panel/open target)
- *   `#/legacy`                             the frozen v1 app, reachable during the switch-over
  *
  * `q` is the UTF-8 JSON of a `LexQuery`, base64url encoded, so Unicode spellings survive
  * (`café`, `coup d'état`) without depending on URL escaping rules. `ref` is percent-encoded
@@ -29,7 +28,7 @@ import {
 export const WORKSPACES = ['explore', 'corpus', 'family', 'study', 'insights', 'data'] as const;
 
 export type WorkspaceId = (typeof WORKSPACES)[number];
-export type RouteWorkspace = WorkspaceId | 'legacy';
+export type RouteWorkspace = WorkspaceId;
 
 export interface AppRoute {
   workspace: RouteWorkspace;
@@ -72,8 +71,7 @@ export function decodeRoute(input: string | null | undefined): AppRoute {
   const raw = (input ?? '').replace(/^#/, '');
   const [pathPart, searchPart = ''] = raw.split('?');
   const workspaceName = pathPart.replace(/^\/+|\/+$/g, '').toLowerCase();
-  const workspace: RouteWorkspace =
-    workspaceName === 'legacy' ? 'legacy' : isWorkspaceId(workspaceName) ? workspaceName : DEFAULT_WORKSPACE;
+  const workspace: RouteWorkspace = isWorkspaceId(workspaceName) ? workspaceName : DEFAULT_WORKSPACE;
 
   const params = new URLSearchParams(searchPart);
   const query = readQuery(params.get('q'));

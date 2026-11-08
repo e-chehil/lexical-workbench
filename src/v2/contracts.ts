@@ -107,6 +107,83 @@ export interface FamilyDetailDTO {
   progress: { formsMastered: number; formsTotal: number; weighted: CoverageResult };
 }
 
+/**
+ * One learning target resolved for a study queue / collection view. `entityRef` is null when the
+ * current sources no longer contain the target (the record is kept and shown as an orphan).
+ */
+export interface TargetRowDTO {
+  target: TargetRef;
+  /** Raw source spelling for the entity, or the target key when the entity is missing. */
+  label: string;
+  entityRef: EntityRef | null;
+  kind: EntityKind | 'lemma_pos_target';
+  status: EffectiveStatus;
+  tags: string[];
+  note: string;
+  studyCount: number;
+  lastStudiedAt: string | null;
+  metrics: MetricCell[];
+}
+
+// ---------------------------------------------------------------------------
+// Insights (V2-T08)
+// ---------------------------------------------------------------------------
+
+export interface InsightsRequest {
+  /** Reserved for future filtering; the report is currently global. */
+  includeEvents?: boolean;
+}
+
+/** One report cell. `query` opens the underlying set in Explore. */
+export interface InsightBucket {
+  id: string;
+  label: string;
+  /** Units counted in this cell. */
+  value: number;
+  /** Denominator when the cell represents progress. */
+  total?: number;
+  /** value / total when both are known. */
+  ratio?: number | null;
+  /** What one unit is, in words (e.g. “COCA 词性条目”). */
+  unit: string;
+  query: LexQuery;
+  /** Optional honesty note (e.g. “按成员槽统计”）. */
+  note?: string;
+}
+
+export interface StatusCounts {
+  total: number;
+  byStatus: Record<LearningStatus, number>;
+}
+
+export interface InsightsReport {
+  units: {
+    forms: number;
+    cocaHeadwords: number;
+    cocaRecords: number;
+    bncFamilies: number;
+    bncMembers: number;
+    cetEntries: number;
+    cetLinks: number;
+  };
+  status: {
+    forms: StatusCounts;
+    cocaHeadwords: StatusCounts;
+    cocaRecords: StatusCounts;
+    bncFamilies: { total: number; masteredAll: number; masteredAny: number; untouched: number };
+    cetEntries: { total: number; full: number; partial: number; untouched: number };
+  };
+  /** Official rank buckets over COCA records. */
+  cocaRankBuckets: InsightBucket[];
+  /** Distinct member Forms per BNC band, with mastered progress. */
+  bncBands: InsightBucket[];
+  coverage: {
+    coca: InsightBucket[];
+    bnc: InsightBucket[];
+    cet: { total: number; partial: number; full: number; partialRatio: number | null; fullRatio: number | null };
+  };
+}
+
 /** Worker RPC surface (src/v2/worker). All methods are async across the worker boundary. */
 export interface LexicalEngineApi {
   ready(): Promise<{ sources: SourceId[]; diagnostics: SourceDiagnostic[]; buildMs: number }>;
@@ -116,6 +193,10 @@ export interface LexicalEngineApi {
   compare(a: EntityRef[], b: EntityRef[], at: EntityKind): Promise<SetComparison>;
   formDetail(formRef: EntityRef): Promise<FormDetailDTO | null>;
   familyDetail(familyRef: EntityRef): Promise<FamilyDetailDTO | null>;
+  /** Resolves stored learning targets into labels, status and metrics (Study queue, Data Studio). */
+  resolveTargets(targets: TargetRef[], columns?: MetricId[]): Promise<TargetRowDTO[]>;
+  /** Learning-state report for the Insights workspace (global, no paging). */
+  insights(req?: InsightsRequest): Promise<InsightsReport>;
   alignment(): Promise<AlignmentReport>;
   /** Pushes the current learning state snapshot into the worker (after store changes). */
   syncLearning(records: LearningRecord[]): Promise<void>;

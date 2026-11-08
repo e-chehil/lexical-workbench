@@ -31,6 +31,8 @@ export interface RowsWindowRequest {
   scope: LexQuery;
   columns: MetricId[];
   aggregates: AggregateSpec[];
+  /** A version that changes after the worker acknowledged a learning snapshot. */
+  statusVersion?: number;
 }
 
 export interface RowsWindowApi {
@@ -56,7 +58,7 @@ interface WindowsState {
 
 const EMPTY_STATE: WindowsState = { total: null, aggregates: [], windows: new Map() };
 
-export function useRowsWindow({ client, engineStatus, scope, columns, aggregates }: RowsWindowRequest): RowsWindowApi {
+export function useRowsWindow({ client, engineStatus, scope, columns, aggregates, statusVersion = 0 }: RowsWindowRequest): RowsWindowApi {
   const queryKey = useMemo(() => canonicalJson(scope), [scope]);
   const columnsKey = useMemo(() => canonicalJson({ columns, aggregates }), [columns, aggregates]);
 
@@ -167,6 +169,15 @@ export function useRowsWindow({ client, engineStatus, scope, columns, aggregates
     if (engineStatus !== 'ready') return;
     if (windowsRef.current.size === 0) fetchRef.current(0, true);
   }, [engineStatus]);
+
+  // Learning state was synchronised into the worker: status cells are part of the DTO, so the
+  // already loaded windows must be re-read without resetting the scroll position.
+  const lastStatusVersion = useRef(statusVersion);
+  useEffect(() => {
+    if (lastStatusVersion.current === statusVersion) return;
+    lastStatusVersion.current = statusVersion;
+    for (const index of [...windowsRef.current.keys()]) fetchRef.current(index, true);
+  }, [statusVersion]);
 
   // Column change: same rows, new cells. Forced reload replaces the cached DTOs in place.
   const firstColumnsRun = useRef(true);

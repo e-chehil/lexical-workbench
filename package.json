@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "lexical-workbench",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,21 +10,18 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/data/parser.test.ts src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts src/v2/tests/worker.test.ts src/app/routing/codec.test.ts src/app/routing/openInExplore.test.ts src/app/workspaces/explore/exploreFilters.test.ts src/app/workspaces/explore/selection.test.ts",
-    "test:v2": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts src/v2/tests/worker.test.ts src/app/routing/codec.test.ts src/app/routing/openInExplore.test.ts src/app/workspaces/explore/exploreFilters.test.ts src/app/workspaces/explore/selection.test.ts",
+    "test": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts src/v2/tests/worker.test.ts src/v2/tests/insights.test.ts src/v2/tests/planning.test.ts src/v2/tests/csv.test.ts src/v2/tests/cet.test.ts src/app/routing/codec.test.ts src/app/routing/openInExplore.test.ts src/app/workspaces/explore/exploreFilters.test.ts src/app/workspaces/explore/selection.test.ts",
+    "test:v2": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts src/v2/tests/worker.test.ts src/v2/tests/insights.test.ts src/v2/tests/planning.test.ts src/v2/tests/csv.test.ts src/v2/tests/cet.test.ts src/app/routing/codec.test.ts src/app/routing/openInExplore.test.ts src/app/workspaces/explore/exploreFilters.test.ts src/app/workspaces/explore/selection.test.ts",
     "audit:v2": "tsx scripts/audit-v2.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/source-serif-4": "^5.3.1",
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-table": "^9.3.1",
     "@tanstack/react-virtual": "^3.14.26",
     "@vitejs/plugin-react": "^6.1.1",
     "dexie": "^4.4.7",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -33,7 +30,6 @@
     "vite-plugin-pwa": "^2.0.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

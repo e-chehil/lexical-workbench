@@ -132,7 +132,7 @@ test('handlers: syncLearning replaces the learning state used by filters and DTO
   assert.equal((await handlers.query(masteredQuery)).total, 0, 'replacing with an empty snapshot clears it');
 });
 
-test('handlers: the plan stub and query misuse travel as coded error envelopes', async () => {
+test('handlers: the plan is implemented and query misuse travels as a coded error envelope', async () => {
   const handlers = createEngineHandlers(index);
 
   const sumOnLifted = await dispatchMessage(handlers, {
@@ -151,13 +151,27 @@ test('handlers: the plan stub and query misuse travel as coded error envelopes',
   });
 
   const plan = await dispatchMessage(handlers, { id: 8, method: 'plan', args: [{ strategy: 'coca_high_freq', size: 20 }] });
-  assert.equal(plan.ok, false);
-  assert.ok(plan.ok === false && plan.error.code === 'not_implemented');
+  assert.equal(plan.ok, true);
+  assert.ok(plan.ok && Array.isArray(plan.value) && (plan.value as { target: string }[])[0].target === 'f:the');
 
-  await assert.rejects(
-    () => handlers.plan({ strategy: 'coca_high_freq', size: 20 }),
-    (e: unknown) => e instanceof EngineError && e.code === 'not_implemented'
-  );
+  const direct = await handlers.plan({ strategy: 'coca_high_freq', size: 20 });
+  assert.equal(direct.length, 20);
+});
+
+test('handlers: resolveTargets and insights expose the synchronised learning state', async () => {
+  const handlers = createEngineHandlers(index);
+  await handlers.syncLearning([rec(refs.formTarget('work'), 'mastered')]);
+
+  const targets = await handlers.resolveTargets(['f:work', 'f:not-a-real-form']);
+  assert.equal(targets.length, 2);
+  assert.equal(targets[0].entityRef, 'f:work');
+  assert.equal(targets[0].status.status, 'mastered');
+  assert.equal(targets[1].entityRef, null, 'an orphan target is kept, not deleted');
+
+  const report = await handlers.insights();
+  assert.equal(report.units.forms, 94954);
+  assert.equal(report.status.forms.byStatus.mastered, 1);
+  assert.equal(report.coverage.coca[0].value, 1_310_264);
 });
 
 test('handlers: unknown methods and malformed messages answer without throwing', async () => {
@@ -190,7 +204,7 @@ test('registry: every declared method must be registered exactly once', () => {
   const core = createEngineHandlers(index);
   const assembled = assembleHandlers(core);
   for (const method of ENGINE_METHODS) assert.equal(typeof assembled[method], 'function', method);
-  assert.equal(ENGINE_METHODS.length, 10);
+  assert.equal(ENGINE_METHODS.length, 12);
   assert.ok(isEngineMethod('rows'));
   assert.ok(!isEngineMethod('setCustomSource'), 'setCustomSource is a worker control method until T13');
   assert.ok(isControlMethod('setCustomSource'));
@@ -617,8 +631,8 @@ test('client: errors keep name and code, worker crashes reject pending calls', a
     return true;
   });
 
-  const planned = client.plan({ strategy: 'coca_high_freq', size: 20 });
-  await assert.rejects(planned, (e: unknown) => e instanceof EngineClientError && e.code === 'not_implemented');
+  const planned = await client.plan({ strategy: 'coca_high_freq', size: 20 });
+  assert.equal(planned[0].target, 'f:the');
 
   // A worker-level failure rejects everything in flight instead of hanging.
   const pending = client.query({ kind: 'form' });

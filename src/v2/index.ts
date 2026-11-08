@@ -33,4 +33,13 @@ export {
 export * from './engine/query.ts';
 export * from './engine/alignment.ts';
 export * from './learning/model.ts';
+export { buildTargetRows, targetEntity } from './learning/targets.ts';
+export { buildInsightsReport, COCA_RANK_BUCKETS, statusQueryFor } from './insights/report.ts';
+export {
+  planStrategy,
+  planCocaHighFreq,
+  planBncFamilyCompletion,
+  planCetSyllabus,
+  planCustomMix,
+} from './planning/planner.ts';
 export type * from './contracts.ts';

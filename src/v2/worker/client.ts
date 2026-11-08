@@ -97,6 +97,14 @@ export class EngineClient implements LexicalEngineApi {
     return this.send<Awaited<ReturnType<LexicalEngineApi['familyDetail']>>>('familyDetail', [familyRef]);
   }
 
+  resolveTargets(targets: Parameters<LexicalEngineApi['resolveTargets']>[0], columns?: Parameters<LexicalEngineApi['resolveTargets']>[1]) {
+    return this.send<Awaited<ReturnType<LexicalEngineApi['resolveTargets']>>>('resolveTargets', [targets, columns]);
+  }
+
+  insights(req?: Parameters<LexicalEngineApi['insights']>[0]) {
+    return this.send<Awaited<ReturnType<LexicalEngineApi['insights']>>>('insights', [req]);
+  }
+
   alignment() {
     return this.send<Awaited<ReturnType<LexicalEngineApi['alignment']>>>('alignment', []);
   }

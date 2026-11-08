@@ -28,12 +28,12 @@ export default defineConfig(() => {
         },
         manifest: {
           id: basePath,
-          name: 'Lexical Workbench — 英语词汇数据库与词族分析工作台',
+          name: 'Lexical Workbench — 英语词汇观测台',
           short_name: 'LexicalWB',
           description:
-            '本地优先的个人英语词汇数据库、BNC/COCA 词族检索、CET-4/CET-6 大纲对照与学习规划系统',
-          theme_color: '#1D4ED8',
-          background_color: '#F8FAFC',
+            '本地优先的英语词汇观测台：COCA 2020、BNC/COCA 25k 与 CET 2016 的统一检索、词族分析与可解释学习规划',
+          theme_color: '#101613',
+          background_color: '#EEEAE1',
           display: 'standalone',
           orientation: 'any',
           scope: basePath,

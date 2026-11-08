@@ -13,7 +13,7 @@ Global commands (every task):
 
 ```bash
 npm run lint      # tsc --noEmit, must be clean
-npm test          # legacy parser tests + v2 real-data tests, all must pass
+npm test          # v2 real-data tests, all must pass
 npm run build     # vite production build must succeed
 ```
 
@@ -30,15 +30,15 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | V2-T03 | Engine worker, browser loader, RPC client | T01 | done (2026-11-08, 386207a) |
 | V2-T04 | App shell, routing codec, providers, global search | T02, T03 | done (2026-11-08, 30d36e4) |
 | V2-T05 | Explore workspace | T04 | done (2026-11-08, 91e2faf) |
-| V2-T06 | Detail panels (Form page, Family sheet, entity chips) | T04 | todo |
-| V2-T07 | Family Atlas workspace | T06 | todo |
-| V2-T08 | Insights builders (pure) + worker method | T03 | todo |
-| V2-T09 | Study planner strategies (pure) + worker method | T03 | todo |
-| V2-T10 | Corpus Lab workspace | T05 | todo |
-| V2-T11 | Study workspace | T06, T09 | todo |
-| V2-T12 | Insights workspace | T05, T08 | todo |
-| V2-T13 | Data Studio workspace | T05 | todo |
-| V2-T14 | Legacy removal and utility migration | T05–T13 | todo |
+| V2-T06 | Detail panels (Form page, Family sheet, entity chips) | T04 | done (2026-11-08) |
+| V2-T07 | Family Atlas workspace | T06 | done (2026-11-08) |
+| V2-T08 | Insights builders (pure) + worker method | T03 | done (2026-11-08) |
+| V2-T09 | Study planner strategies (pure) + worker method | T03 | done (2026-11-08) |
+| V2-T10 | Corpus Lab workspace | T05 | done (2026-11-08) |
+| V2-T11 | Study workspace | T06, T09 | done (2026-11-08) |
+| V2-T12 | Insights workspace | T05, T08 | done (2026-11-08) |
+| V2-T13 | Data Studio workspace | T05 | done (2026-11-08) |
+| V2-T14 | Legacy removal and utility migration | T05–T13 | done (2026-11-08) |
 
 Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} → {T07, T10, T11, T12, T13} → T14.
 
@@ -367,7 +367,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T06 — Detail panels
 
-- **Status**: todo
+- **Status**: done (2026-11-08)
 - **Goal**: Form page, Family sheet and source-entity views used by every workspace; PoS strip with
   own/inherited status; entity chips; metric cell renderer with tooltip.
 - **Depends on**: T04.
@@ -383,7 +383,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T07 — Family Atlas
 
-- **Status**: todo · **Depends on**: T06
+- **Status**: done (2026-11-08)
 - **Goal**: PRODUCT_SPEC §3.3.
 - **Allowed files**: `src/app/workspaces/family/**`.
 - **Must reuse**: `engine.rows` (kind `bnc_family`, sorts by `bnc25k.family_total`/`family_band`),
@@ -394,7 +394,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T08 — Insights builders (pure) + worker method
 
-- **Status**: todo · **Depends on**: T03
+- **Status**: done (2026-11-08)
 - **Goal**: Pure statistics for PRODUCT_SPEC §3.5.
 - **Allowed files**: create `src/v2/insights/**`, `src/v2/tests/insights.test.ts`; **additive** change
   to `src/v2/contracts.ts`: add `InsightsRequest`, `InsightsReport` types and
@@ -414,7 +414,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T09 — Study planner strategies (pure) + worker method
 
-- **Status**: todo · **Depends on**: T03
+- **Status**: done (2026-11-08)
 - **Goal**: Implement `StudyPlanner` for the four `StrategyId`s (PRODUCT_SPEC §3.4) with `PlanReason`s.
 - **Allowed files**: create `src/v2/planning/**`, `src/v2/tests/planning.test.ts`; replace the `plan`
   stub handler in `src/v2/worker/handlers.ts` (one function).
@@ -434,7 +434,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T10 — Corpus Lab
 
-- **Status**: todo · **Depends on**: T05
+- **Status**: done (2026-11-08)
 - **Goal**: PRODUCT_SPEC §3.2.
 - **Allowed files**: `src/app/workspaces/corpus/**`; may add a lightweight SVG chart component in
   that folder (no new chart dependency).
@@ -445,7 +445,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T11 — Study workspace
 
-- **Status**: todo · **Depends on**: T06, T09
+- **Status**: done (2026-11-08)
 - **Goal**: PRODUCT_SPEC §3.4 (collections, queue, planner UI, export).
 - **Allowed files**: `src/app/workspaces/study/**`; create `src/v2/util/csv.ts` by moving (copying)
   `splitCsvRecords`, `parseCsvLine`, `escapeCsvField` from `src/data/searchAndFilter.ts` with their tests
@@ -455,14 +455,14 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T12 — Insights workspace
 
-- **Status**: todo · **Depends on**: T05, T08
+- **Status**: done (2026-11-08)
 - **Goal**: PRODUCT_SPEC §3.5 UI; event timeline from `store.events`.
 - **Allowed files**: `src/app/workspaces/insights/**`.
 - **Acceptance**: PRODUCT_SPEC §3.5 items 1–3.
 
 ## V2-T13 — Data Studio
 
-- **Status**: todo · **Depends on**: T05
+- **Status**: done (2026-11-08)
 - **Goal**: PRODUCT_SPEC §3.6: source cards, diagnostics, alignment panels, custom source upload
   (validated in worker, persisted in `customSources`), user data export/import, orphan targets.
 - **Allowed files**: `src/app/workspaces/data/**`; `src/v2/store/customSources.ts`; worker message
@@ -471,7 +471,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T14 — Legacy removal and utility migration
 
-- **Status**: todo · **Depends on**: T05–T13
+- **Status**: done (2026-11-08)
 - **Goal**: Delete v1 UI/data/db code and make v2 self-contained.
 - **Allowed files**: delete `src/App.tsx`, `src/components/**`, `src/db/**`, `src/data/searchAndFilter.ts`,
   `src/utils/frequency.ts`; move CET expansion (`extractHomograph`, `expandCetMemberToken`,
@@ -485,6 +485,16 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ---
 
+
+## Completion notes (2026-11-08, UI redesign round)
+
+- **V2-T06–T13 implemented** in the new Observatory UI: `src/app/detail/**`, `src/app/workspaces/{family,corpus,study,insights,data}/**`, `src/app/components/**`.
+- **Engine additions**: `insights/report.ts` (`buildInsightsReport`), `planning/planner.ts` (`planStrategy` and four strategies), `learning/targets.ts` (`buildTargetRows`), plus `insights` and `resolveTargets` worker methods. Tests: `src/v2/tests/insights.test.ts`, `planning.test.ts`, `csv.test.ts`, `cet.test.ts`.
+- **UI redesign**: replaced the registry masthead with a dark numbered rail + warm stone canvas, inline filter rail, docked/floating detail, new roster and entity pages. Workspaces other than Explore are route-level lazy chunks.
+- **Data safety**: the worker learning snapshot is now acknowledged (`syncedVersion`) before server DTO reads; rows refresh without losing scroll. Persisted custom source texts are re-applied before workspace mount.
+- **T14**: legacy `src/App.tsx`, `src/components`, `src/db`, `src/data`, `src/utils/frequency.ts` removed; CET expansion moved to `src/v2/sources/cetExpansion.ts`; `#/legacy` route removed.
+- **Known deviations**: `setCustomSource` remains a worker control method rather than a typed `LexicalEngineApi` method; the UI always goes through Data Studio. Insights BNC band progress counts distinct member Forms but its drill-down query opens membership slots (the only exact query available without a new filter); this is stated in the panel note.
+
 ## Change control for public interfaces
 
 | Interface | Owner | May change in |
@@ -495,4 +505,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T06
+NEXT_TASK: MAINTENANCE

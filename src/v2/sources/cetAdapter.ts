@@ -1,19 +1,19 @@
 /**
- * CET2016 syllabus adapter (v2). Reuses the battle-tested v1 token expansion
- * (src/data/parser.ts → parseCet2016) and maps it onto v2 entities.
+ * CET2016 syllabus adapter (v2). Uses the deterministic token expansion in
+ * `cetExpansion.ts` and maps the result onto v2 entities.
  */
-import { parseCet2016 } from '../../data/parser.ts';
+import { parseCet2016 } from './cetExpansion.ts';
 import { refs } from '../domain/ids.ts';
 import { SourceFormatError, type CetEntry, type CetFormLink, type CetSnapshot, type SourceDiagnostic } from '../domain/types.ts';
 
 export function parseCetSyllabus(rawText: string): CetSnapshot {
-  const { entries: legacy } = parseCet2016(rawText);
-  if (legacy.length === 0) throw new SourceFormatError('cet2016', 'no entries found');
+  const { entries: parsed } = parseCet2016(rawText);
+  if (parsed.length === 0) throw new SourceFormatError('cet2016', 'no entries found');
   const diagnostics: SourceDiagnostic[] = [];
   const seen = new Set<string>();
   const entries: CetEntry[] = [];
 
-  for (const e of legacy) {
+  for (const e of parsed) {
     const ref = refs.cetEntry(e.headwordDisplay);
     if (seen.has(ref)) {
       diagnostics.push({

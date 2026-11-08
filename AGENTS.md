@@ -19,7 +19,7 @@ from git are expected).
 
 ```bash
 npm run lint       # type check — must be clean
-npm test           # legacy parser tests + v2 real-data tests
+npm test           # v2 engine/store/routing/UI-logic tests against real data
 npm run test:v2    # v2 tests only
 npm run build      # production build
 npm run audit:v2   # regenerate docs/v2/data-audit.generated.json (only when adapters/data change)
@@ -38,14 +38,17 @@ npm run dev        # http://localhost:3000
 | `src/v2/domain/` | ids, entity types, metric registry |
 | `src/v2/sources/` | one adapter per source |
 | `src/v2/engine/` | `LexicalIndex`, query protocol, projection, alignment, `dto.ts` (row / form / family DTO builders for the worker and UI) |
-| `src/v2/learning/` | learning targets, effective status, coverage |
-| `src/v2/contracts.ts` | DTO / worker / store / planner contracts (types for upcoming tasks) |
+| `src/v2/learning/` | learning targets, effective status, coverage, `targets.ts` (target → row resolution) |
+| `src/v2/insights/` | pure learning report builder (`buildInsightsReport`) |
+| `src/v2/planning/` | pure study planner strategies (`planStrategy`) |
+| `src/v2/util/` | RFC 4180 CSV helpers |
+| `src/v2/contracts.ts` | DTO / worker / store / planner contracts (implemented) |
 | `src/v2/store/` | user data store: `core.ts` (pure patch/undo), `dexieStore.ts` (`LexicalWorkbenchDB_v2`), `collections.ts`, `backup.ts` |
 | `src/v2/worker/` | engine worker + RPC: `engine.worker.ts` (build policy), `loadBrowser.ts` (BASE_URL fetch + payload shape guard), `handlers.ts` (pure dispatcher), `registry.ts` (method table, append-only), `client.ts` (main-thread proxy) |
 | `src/v2/index.ts` | public surface — app code imports v2 only from here |
 | `src/v2/node/` | Node-only loaders for tests/scripts — never import in browser code |
-| `src/app/` | new v2 UI: `Root.tsx`, `routing/` (hash codec + Open-in-Explore), `providers/` (Route/Engine/Learning), `shell/`, `search/`, `detail/`, `workspaces/explore/` (filter state, windowed rows, table, bulk actions) |
-| `src/App.tsx`, `src/components/`, `src/data/`, `src/db/` | **legacy v1, frozen** — do not extend; removed in T14 |
+| `src/app/` | v2 UI (Observatory): `Root.tsx`, `routing/` (hash codec + Open-in-Explore), `providers/` (Route/Engine/Learning, `syncedVersion`), `shell/` (dark rail + top bar), `search/`, `detail/` (Form / Family / source entity pages), `collections/`, `ui/` (format + primitives), `workspaces/{explore,corpus,family,study,insights,data}/` |
+| `src/v2/tests/` | real-data tests: coca, engine, dto, store, worker, insights, planning, csv, cet |
 
 ## Domain in one screen
 
@@ -87,7 +90,10 @@ npm run dev        # http://localhost:3000
 - Import with `.ts` extensions (existing convention). Keep comments factual and short.
 - Pure logic gets `node:test` tests in `src/v2/tests/` against the **real** data files
   (`loadFullIndex()`); synthetic inputs only for validation/error paths. Add new test files to the
-  `test` and `test:v2` scripts.
+  `test` and `test:v2` scripts. A test run currently covers 119 cases and takes ~13 s.
+- Worker DTO reads that depend on learning state use `learning.syncedVersion`, not `version`:
+  the store commits before the worker acknowledges the snapshot. Explore row windows refresh on
+  `syncedVersion` without losing scroll.
 - UI changes: verify the listed acceptance items in the in-app browser (`npm run dev`).
 
 ## Finishing a task

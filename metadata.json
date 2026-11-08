@@ -1,6 +1,6 @@
 {
   "name": "Lexical Workbench",
-  "description": "Local-first English vocabulary database, BNC/COCA word family & frequency analyzer, CET-4/CET-6 outline reference, and personal learning planner.",
+  "description": "Local-first English vocabulary observatory: COCA 2020, BNC/COCA 25k and CET 2016 in one queryable workbench with explainable study planning.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

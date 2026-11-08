@@ -1,99 +1,83 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Design tokens — Lexical Workbench 2.0 (Shape Brief §5, direction A「登记册」+C 双墨).
+   Lexical Workbench 2.0 — "Observatory" design system.
 
-   Voice contract (not colour alone):
-   - official ink (source facts): solid weight, --official red reserved for official
-     ranks / CET levels / errors;
-   - computed pencil (derived): regular text with a literal「（计算）」in the header label;
-   - absent: "--" plus a written source note, never shaped like a zero;
-   - personal ink (learning states / collections): interactive voice with text labels.
+   The interface is an observation instrument, not a card dashboard:
+   - a dark, fixed navigation rail with a lime live marker;
+   - a warm stone canvas with hairline rules and a faint 32px measuring grid;
+   - serif display words, monospaced labels and numerals, system sans for prose;
+   - one signal colour (international orange) for interaction and live state;
+   - provenance voices: official ink (solid), computed pencil (muted + literal
+     「（计算）」), absent dash (never a zero), personal status (colour + text).
 --------------------------------------------------------------------------- */
 @layer base {
   :root {
     color-scheme: light;
 
-    /* surfaces: cool paper, not grey-blue */
-    --bg-canvas: #fafaf8;
-    --bg-surface: #ffffff;
-    --bg-elevated: #f4f4f1;
-    --bg-subtle: #ebebe6;
-    --bg-hover: #f1f1ed;
+    /* chrome */
+    --rail: #101613;
+    --rail-2: #17201b;
+    --rail-line: #2a352e;
+    --rail-text: #e9e6da;
+    --rail-muted: #8b938a;
+    --lime: #d6f36b;
+    --lime-dim: rgba(214, 243, 107, 0.14);
+
+    /* canvas */
+    --bg-canvas: #eeeae1;
+    --bg-surface: #f8f6f0;
+    --bg-elevated: #fffdf8;
+    --bg-inset: #e5e0d3;
+    --bg-hover: #efebe1;
+    --bg-ink: #161b18;
 
     /* ink */
-    --text-primary: #1c2430;
-    --text-secondary: #3d4654;
-    --text-muted: #6b7380;
+    --text-primary: #171d19;
+    --text-secondary: #3f4741;
+    --text-muted: #737b72;
+    --text-faint: #9aa096;
 
     /* lines */
-    --border-subtle: #e5e4de;
-    --border-hairline: #e5e4de;
-    --border-strong: #c9c8c0;
+    --border-subtle: #d8d3c5;
+    --border-hairline: #e2ddd1;
+    --border-strong: #b8b2a2;
 
-    /* interactive voice */
-    --accent-primary: #3b5bdb;
-    --accent-hover: #2f4ec2;
-    --accent-soft: rgba(59, 91, 219, 0.08);
-    --accent-primary-soft: rgba(59, 91, 219, 0.08);
+    /* signal + data voices */
+    --signal: #d9480f;
+    --signal-hover: #b93c0b;
+    --signal-soft: rgba(217, 72, 15, 0.09);
+    --stamp: #9c2b0f;
+    --stamp-soft: rgba(156, 43, 15, 0.08);
+    --pencil: #6f766e;
+    --pencil-line: rgba(111, 118, 110, 0.42);
+    --seal: #1f6f5c;
 
-    /* official voice (source-fact anchors, CET levels, errors) */
-    --official: #b03a2e;
-    --official-soft: rgba(176, 58, 46, 0.08);
-
-    /* personal ink: the five learning states (always paired with a text label) */
-    --st-unrated: #6b7380;
-    --st-unrated-soft: rgba(107, 115, 128, 0.12);
+    /* learning states (always paired with a text label) */
+    --st-unrated: #737b72;
+    --st-unrated-soft: rgba(115, 123, 114, 0.13);
     --st-queued: #2b6cb0;
     --st-queued-soft: rgba(43, 108, 176, 0.12);
-    --st-learning: #b7791f;
-    --st-learning-soft: rgba(183, 121, 31, 0.14);
-    --st-mastered: #2f855a;
-    --st-mastered-soft: rgba(47, 133, 90, 0.13);
+    --st-learning: #a86312;
+    --st-learning-soft: rgba(168, 99, 18, 0.14);
+    --st-mastered: #25704c;
+    --st-mastered-soft: rgba(37, 112, 76, 0.13);
     --st-deferred: #6b46c1;
     --st-deferred-soft: rgba(107, 70, 193, 0.12);
 
-    /* type */
     --font-ui: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     --font-serif: "Source Serif 4", Georgia, Cambria, "Times New Roman", serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --rail-width: 232px;
+    --topbar-height: 56px;
+    --radius: 3px;
   }
 
-  .dark {
-    color-scheme: dark;
-
-    --bg-canvas: #0e1526;
-    --bg-surface: #16203a;
-    --bg-elevated: #1c2846;
-    --bg-subtle: #22304f;
-    --bg-hover: rgba(34, 48, 79, 0.7);
-
-    --text-primary: #f2f4f8;
-    --text-secondary: #c7cdd8;
-    --text-muted: #8f97a6;
-
-    --border-subtle: #22304f;
-    --border-hairline: #22304f;
-    --border-strong: #354468;
-
-    --accent-primary: #6485f0;
-    --accent-hover: #8aa6f5;
-    --accent-soft: rgba(100, 133, 240, 0.14);
-    --accent-primary-soft: rgba(100, 133, 240, 0.14);
-
-    --official: #e08076;
-    --official-soft: rgba(224, 128, 118, 0.12);
-
-    --st-unrated: #8f97a6;
-    --st-unrated-soft: rgba(143, 151, 166, 0.16);
-    --st-queued: #7ca8e8;
-    --st-queued-soft: rgba(124, 168, 232, 0.16);
-    --st-learning: #e2b45c;
-    --st-learning-soft: rgba(226, 180, 92, 0.16);
-    --st-mastered: #6fc493;
-    --st-mastered-soft: rgba(111, 196, 147, 0.16);
-    --st-deferred: #b49ae8;
-    --st-deferred-soft: rgba(180, 154, 232, 0.16);
+  html,
+  body,
+  #root {
+    height: 100%;
   }
 
   html,
@@ -103,23 +87,42 @@
     font-family: var(--font-ui);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
+    overflow: hidden;
+  }
+
+  body {
+    background-image:
+      linear-gradient(to right, rgba(23, 29, 25, 0.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(23, 29, 25, 0.028) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-attachment: fixed;
   }
 
   ::selection {
-    background-color: rgba(59, 91, 219, 0.16);
+    background-color: rgba(217, 72, 15, 0.2);
   }
-  .dark ::selection {
-    background-color: rgba(100, 133, 240, 0.28);
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 1px;
   }
 }
 
-/* Latin headwords: serif voice for the reading layer (headwords are always Latin words). */
-.font-serif-lexicon {
+/* ---------------------------------------------------------------------------
+   Type voices
+--------------------------------------------------------------------------- */
+.font-display {
   font-family: var(--font-serif);
+  font-optical-sizing: auto;
 }
 
-/* Numerals and refs: tabular mono voice; data and measurement only, never decoration. */
 .font-mono-tabular,
 .tabular-nums {
   font-family: var(--font-mono);
@@ -131,9 +134,284 @@
   font-family: var(--font-mono);
 }
 
-.focus-ring:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 1px;
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.eyebrow-on-rail {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--rail-muted);
+}
+
+.data-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+
+/* Computed voice: dotted underline is the non-colour cue; label still says （计算）. */
+.voice-computed {
+  color: var(--pencil);
+  text-decoration: underline dotted var(--pencil-line);
+  text-underline-offset: 3px;
+}
+
+.voice-absent {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Surfaces & controls
+--------------------------------------------------------------------------- */
+.rule {
+  border-color: var(--border-subtle);
+}
+
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.panel-flat {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.kbd {
+  display: inline-flex;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-bottom-color: var(--border-strong);
+  border-radius: 2px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: #fff8f3;
+}
+
+.btn-primary:hover {
+  border-color: var(--signal-hover);
+  background: var(--signal-hover);
+  color: #fff;
+}
+
+.btn-ink {
+  border-color: var(--bg-ink);
+  background: var(--bg-ink);
+  color: var(--bg-surface);
+}
+
+.btn-ink:hover {
+  background: #27302a;
+  color: #fff;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-hover);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  white-space: nowrap;
+}
+
+.chip-active {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.chip-signal {
+  border-color: color-mix(in srgb, var(--signal) 40%, var(--border-subtle));
+  background: var(--signal-soft);
+  color: var(--signal-hover);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 6px 9px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-primary);
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.input:focus {
+  border-color: var(--signal);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
+.select {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 2px 7px;
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.tab-active {
+  border-bottom-color: var(--signal);
+  color: var(--text-primary);
+}
+
+/* Rail navigation */
+.rail-link {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border-left: 2px solid transparent;
+  padding: 9px 14px 9px 12px;
+  color: var(--rail-muted);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.rail-link:hover {
+  color: var(--rail-text);
+  background: var(--rail-2);
+}
+
+.rail-link[aria-current="page"] {
+  border-left-color: var(--lime);
+  background: var(--lime-dim);
+  color: var(--rail-text);
+}
+
+/* Table */
+.roster-head {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.roster-row {
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.roster-row:hover {
+  background: var(--bg-hover);
+}
+
+.roster-row[data-selected="true"] {
+  background: var(--signal-soft);
+}
+
+.roster-row[data-focused="true"] {
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+/* Status tone helpers (background + text; the label is always rendered) */
+.st-unrated { background: var(--st-unrated-soft); color: var(--st-unrated); }
+.st-queued { background: var(--st-queued-soft); color: var(--st-queued); }
+.st-learning { background: var(--st-learning-soft); color: var(--st-learning); }
+.st-mastered { background: var(--st-mastered-soft); color: var(--st-mastered); }
+.st-deferred { background: var(--st-deferred-soft); color: var(--st-deferred); }
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 35%, transparent) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -145,44 +423,36 @@
   scrollbar-width: none;
 }
 
-/* Container query helpers for responsive workspace tables */
+/* The roster takes a comfortable minimum width on wide canvases; mobile rows fold. */
 .lexicon-table-container {
   container-type: inline-size;
 }
 
-/* The roster only takes its roomy min width on md+ canvases; mobile rows fold instead. */
 .lex-table-inner {
   min-width: 0;
 }
-@container (min-width: 768px) {
+
+@container (min-width: 720px) {
   .lex-table-inner {
-    min-width: var(--table-min-w, 900px);
+    min-width: var(--table-min-w, 880px);
   }
 }
 
-/* Custom subtle scrollbars (themed, always visible enough to scroll long lists) */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+/* Subtle entrance for overlays and sheets; no decorative motion elsewhere. */
+@keyframes sheet-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+.sheet-in {
+  animation: sheet-in 140ms ease-out;
 }
 
-::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
-  border-radius: 5px;
-  border: 3px solid transparent;
-  background-clip: content-box;
+@keyframes rise-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
-  background-clip: content-box;
-  border: 3px solid transparent;
-}
-
-* {
-  scrollbar-color: color-mix(in srgb, var(--text-muted) 30%, transparent) transparent;
+.rise-in {
+  animation: rise-in 140ms ease-out;
 }

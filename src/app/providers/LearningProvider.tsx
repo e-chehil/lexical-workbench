@@ -22,6 +22,11 @@ export interface LearningContextValue {
   records: LearningRecord[];
   /** Increments on every committed store change (subscribe → re-read). */
   version: number;
+  /** Last store version whose snapshot the worker has acknowledged (server DTO reads wait for this). */
+  syncedVersion: number;
+  /** True after every persisted custom source has been applied to the worker index. */
+  customSourcesReady: boolean;
+  customSourceError: string | null;
   status: LearningStatus;
   error: Error | null;
   /** Re-opens the database after a failure. */
@@ -38,6 +43,9 @@ export function LearningProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<DexieLearningStore | null>(null);
   const [records, setRecords] = useState<LearningRecord[]>([]);
   const [version, setVersion] = useState(0);
+  const [syncedVersion, setSyncedVersion] = useState(0);
+  const [customSourcesReady, setCustomSourcesReady] = useState(false);
+  const [customSourceError, setCustomSourceError] = useState<string | null>(null);
   const [status, setStatus] = useState<LearningStatus>('loading');
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -73,10 +81,12 @@ export function LearningProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
           setError(cause instanceof Error ? cause : new Error(String(cause)));
           setStatus('error');
+          setCustomSourcesReady(true);
         });
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error(String(cause)));
       setStatus('error');
+      setCustomSourcesReady(true);
     }
 
     return () => {
@@ -90,10 +100,39 @@ export function LearningProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const current = storeRef.current;
     if (!current || status !== 'ready' || engineStatus !== 'ready') return;
-    void client.syncLearning([...current.all()]).catch(() => {
-      // A rejected sync leaves the previous worker snapshot in place; the next change retries.
-    });
+    const snapshotVersion = version;
+    void client
+      .syncLearning([...current.all()])
+      .then(() => setSyncedVersion(snapshotVersion))
+      .catch(() => {
+        // A rejected sync leaves the previous worker snapshot in place; the next change retries.
+      });
   }, [client, engineStatus, status, version]);
+
+  // Apply persisted custom source texts once, before the shell mounts any workspace. A failed
+  // custom source is reported but must not keep the app on the boot screen forever.
+  useEffect(() => {
+    if (status !== 'ready' || engineStatus !== 'ready' || !db) return;
+    let cancelled = false;
+    setCustomSourcesReady(false);
+    void db.customSources
+      .toArray()
+      .then(async (rows) => {
+        for (const row of rows) await client.setCustomSource(row.sourceId, row.content);
+        if (!cancelled) {
+          setCustomSourceError(null);
+          setCustomSourcesReady(true);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setCustomSourceError(cause instanceof Error ? cause.message : String(cause));
+        setCustomSourcesReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, status, engineStatus, client]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -104,8 +143,8 @@ export function LearningProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<LearningContextValue>(
-    () => ({ store, db, records, version, status, error, reload, recentEvents }),
-    [store, db, records, version, status, error, reload, recentEvents]
+    () => ({ store, db, records, version, syncedVersion, customSourcesReady, customSourceError, status, error, reload, recentEvents }),
+    [store, db, records, version, syncedVersion, customSourcesReady, customSourceError, status, error, reload, recentEvents]
   );
   return <LearningContext.Provider value={value}>{children}</LearningContext.Provider>;
 }

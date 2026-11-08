@@ -103,12 +103,11 @@ test('codec: unknown or empty input falls back to Explore', () => {
   assert.deepEqual(decodeRoute('#/EXPLORE'), { workspace: 'explore' });
   assert.deepEqual(decodeRoute('/study'), { workspace: 'study' }, 'accepts a hash without the leading #');
   assert.ok(WORKSPACES.every((w) => isWorkspaceId(w)));
-  assert.ok(!isWorkspaceId('legacy'), 'legacy is a route, not a workspace');
+  assert.ok(!isWorkspaceId('legacy'), 'the legacy app has been removed');
 });
 
-test('codec: the legacy route is preserved', () => {
-  assert.deepEqual(decodeRoute('#/legacy'), { workspace: 'legacy' });
-  assert.equal(encodeRoute({ workspace: 'legacy' }), '#/legacy');
+test('codec: a removed legacy route falls back to Explore', () => {
+  assert.deepEqual(decodeRoute('#/legacy'), { workspace: 'explore' });
 });
 
 test('codec: unreadable query or ref is dropped instead of throwing', () => {

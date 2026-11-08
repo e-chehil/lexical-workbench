@@ -211,14 +211,25 @@ Persistence (`LearningStore` in `contracts.ts`) must: write record + event in on
 use one `batchId` per user action; implement undo by replaying `before` values of a batch; never
 delete events except via explicit "clear history".
 
-## 9. Not-yet-implemented contracts (`contracts.ts`)
+## 9. Implemented cross-module contracts (`contracts.ts`)
+
 - **DTOs**: `MetricCell`, `EntityRowDTO`, `RowsRequest`, `RowsPage`, `FormDetailDTO`,
-  `FamilyDetailDTO`. Every number crosses the boundary as a `MetricCell` (metric id + label +
-  provenance), so the UI cannot mislabel it.
-- **Worker API**: `LexicalEngineApi` (query, rows, project, compare, formDetail, familyDetail,
-  alignment, syncLearning).
+  `FamilyDetailDTO`, `TargetRowDTO`. Every number crosses the boundary as a `MetricCell`
+  (metric id + label + provenance), so the UI cannot mislabel it.
+- **Worker API**: `LexicalEngineApi` — query, rows, project, compare, formDetail, familyDetail,
+  `resolveTargets`, `insights`, alignment, syncLearning, plan.
+  `resolveTargets(targets, columns?)` resolves stored `TargetRef`s to labels/status/metrics for
+  Study queues and the orphan audit; a missing entity becomes `entityRef: null`, never a deletion.
+  `insights(req?)` returns the global learning report; every `InsightBucket` carries the
+  `LexQuery` that opens its set.
 - **Store**: `LearningStore`, `TargetPatch`, `Collection` (static = `TargetRef[]`, dynamic = `LexQuery`).
 - **Planner**: `StudyPlanner`, `PlanRequest`, `PlanItem`, `PlanReason`, `StrategyId`.
+  `planStrategy(ctx, req)` is pure; `createEngineHandlers` registers it as the worker `plan`
+  method. `coca_high_freq`, `bnc_family_completion`, `cet_syllabus`, `custom_mix`.
+
+`setCustomSource` remains a worker control method (not part of `LexicalEngineApi`); Data Studio
+persists the text and calls it through `EngineClient.setCustomSource`.
+
 
 ## 10. Errors and empty states
 

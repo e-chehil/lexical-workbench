@@ -22,26 +22,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: "22"
+          cache: npm
 
-      - name: Install dependencies with Bun
-        run: bun install --frozen-lockfile || bun install
+      - name: Install dependencies
+        run: npm ci
 
       - name: Typecheck
-        run: bun run lint
+        run: npm run lint
 
-      - name: Run unit and integration tests
-        run: npx tsx --test src/data/parser.test.ts
+      - name: Run tests (real data)
+        run: npm test
 
       - name: Build static site for GitHub Pages (/lexical-workbench/)
         env:
           GITHUB_PAGES: "true"
           VITE_BASE_PATH: "/lexical-workbench/"
         run: |
-          bun run build
+          npm run build
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 

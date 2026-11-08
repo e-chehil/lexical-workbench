@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local Proma agent skills / session state
+.pi/

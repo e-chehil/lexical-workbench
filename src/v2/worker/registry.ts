@@ -22,6 +22,8 @@ export const ENGINE_METHODS = [
   'compare',
   'formDetail',
   'familyDetail',
+  'resolveTargets',
+  'insights',
   'alignment',
   'syncLearning',
   'plan',

@@ -8,11 +8,14 @@
  * The index is never serialised across the boundary: callers receive DTOs and refs only.
  */
 import { computeAlignmentReport, type AlignmentReport } from '../engine/alignment.ts';
+import { buildInsightsReport } from '../insights/report.ts';
 import { buildFamilyDetail, buildFormDetail, buildRows } from '../engine/dto.ts';
 import type { LexicalIndex } from '../engine/lexicalIndex.ts';
 import { compareRefSets, projectRefs, runQuery, type QueryContext } from '../engine/query.ts';
 import { InMemoryLearningState, type LearningRecord, type LearningStateReader } from '../learning/model.ts';
-import type { SourceId } from '../domain/ids.ts';
+import { buildTargetRows } from '../learning/targets.ts';
+import { planStrategy } from '../planning/planner.ts';
+import type { SourceId, TargetRef } from '../domain/ids.ts';
 import type { SourceDiagnostic } from '../domain/types.ts';
 import type { LexicalEngineApi } from '../contracts.ts';
 
@@ -99,6 +102,14 @@ export function createEngineHandlers(index: LexicalIndex, options: EngineHandler
     async familyDetail(familyRef) {
       return buildFamilyDetail(ctx, familyRef);
     },
+    async resolveTargets(targets, columns) {
+      const records = new Map<TargetRef, LearningRecord>();
+      for (const record of learning.all()) records.set(record.target, record);
+      return buildTargetRows(index, learning, targets, columns ?? [], records);
+    },
+    async insights() {
+      return buildInsightsReport(index, learning);
+    },
     async alignment() {
       alignment ??= computeAlignmentReport(index);
       return alignment;
@@ -106,9 +117,8 @@ export function createEngineHandlers(index: LexicalIndex, options: EngineHandler
     async syncLearning(records) {
       learning.replace(records);
     },
-    async plan() {
-      // Implemented by V2-T09; the client surfaces `code: 'not_implemented'` until then.
-      throw new EngineError('not_implemented', 'study planner is not implemented yet');
+    async plan(req) {
+      return planStrategy(ctx, req);
     },
   };
 }
