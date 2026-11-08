@@ -29,7 +29,7 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | V2-T02 | User data store (Dexie v2) + pure learning store core | — | done (2026-11-08, 0d67e94) |
 | V2-T03 | Engine worker, browser loader, RPC client | T01 | done (2026-11-08, 386207a) |
 | V2-T04 | App shell, routing codec, providers, global search | T02, T03 | done (2026-11-08, 30d36e4) |
-| V2-T05 | Explore workspace | T04 | todo |
+| V2-T05 | Explore workspace | T04 | done (2026-11-08, 91e2faf) |
 | V2-T06 | Detail panels (Form page, Family sheet, entity chips) | T04 | todo |
 | V2-T07 | Family Atlas workspace | T06 | todo |
 | V2-T08 | Insights builders (pure) + worker method | T03 | todo |
@@ -295,7 +295,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T05 — Explore workspace
 
-- **Status**: todo
+- **Status**: done (2026-11-08, 91e2faf)
 - **Goal**: PRODUCT_SPEC §3.1 list part: kind tabs, filter panel, virtualised table with metric
   columns, aggregates, selection and bulk status, "Open in Explore" target.
 - **Depends on**: T04 (uses T06 panel if present; otherwise opens a minimal ref view).
@@ -312,6 +312,58 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 - **Acceptance**: PRODUCT_SPEC §3.1 acceptance items 3, 5, 6 verified in the in-app browser; lint/test/build.
 - **Boundaries**: no client-side filtering/sorting of rows; everything through `rows`.
 - **Report**: implemented filters/columns, performance observation for full-form scroll.
+- **Done (2026-11-08)**: `workspaces/explore/filterState.ts` (state ↔ `LexQuery`, `ALLOWED_COLUMNS`,
+  `DEFAULT_COLUMNS`, `aggregateSpecsFor`, `filtersForKind`, `sortForKind`, `countActiveFilters`,
+  formatting), `selection.ts` (row → learning target, range selection), `useRowsWindow.ts`
+  (200-row windows, generation guard, range debounce), `ResultTable.tsx` (TanStack Virtual +
+  keyboard model), `QueryBar.tsx`, `FilterPanel.tsx`, `ProjectionControl.tsx`, `BulkBar.tsx`,
+  `ExploreWorkspace.tsx`; 15 tests in `exploreFilters.test.ts` + `selection.test.ts`.
+- **Route/state contract**: the URL carries kind, text, filters and sort (the same `LexQuery` the
+  engine receives); the scroll offset is deliberately *not* in the route — it is a view position,
+  and one history entry per scroll would make back/forward useless. Typing mirrors into the URL
+  with `replace` (debounced 260 ms), discrete changes (kind, sort, facet apply) `push`, so back
+  restores the previous filter set (verified: CET6 → 1,725 rows, back → 94,954).
+- **Filters implemented**: sources present/absent, COCA PoS (14), official COCA rank range,
+  derived headword rank range, BNC band range, CET level, learning status (own / effective),
+  spelling classes, multi-PoS, multi-family, plus `in_refs` passthrough for links. **Columns**:
+  per kind from the lift table — form/headword: hw_rank, hw_freq_sum, hw_best_lp_rank,
+  hw_pos_count, member_freq, family_band; coca_lemma_pos adds lp_rank, lp_freq, lp_share;
+  bnc_family: family_total, family_band; bnc_member: member_freq, member_share, family_band,
+  hw_rank; cet_entry: hw_rank, hw_freq_sum, family_band.
+- **Decisions where the contract was silent**: (1) `toQueryFilters` emits a fixed order
+  (sources → PoS → ranges → CET → status → spelling → multi → passthrough) so equal panel states
+  produce equal URLs; (2) an empty text box sends no `text` filter at all; (3) `sum` aggregates are
+  offered only for metrics native to the kind **and** counting occurrences (a sum of ranks/bands/
+  ratios is nonsense), `count_present` always; (4) switching kind drops a rank range the new kind
+  cannot satisfy (official record rank exists only on `coca_lemma_pos`, headword rank never lifts to
+  a family) and a sort the new kind cannot produce, instead of showing an unexplained empty table;
+  (5) bulk status targets are derived per row (`f:`/`lp:`/Form of headword+member) and aggregate
+  kinds (family, CET entry) are reported as skipped rather than silently mapped (ADR-006);
+  (6) "project this set" runs `query` (capped at 5,000 refs, cap reported) → `project` → opens the
+  target kind with an `in_refs` set, which is how acceptance 3 (1,000 → 898) is exercised.
+- **Deviation to record**: the task's *Allowed files* list only `src/app/workspaces/explore/**`, but
+  the workspace cannot render without a shell slot. `shell/Shell.tsx` got three minimal edits
+  (import + render Explore for the explore workspace, bound `main` to the viewport, `h-dvh` root)
+  and `shell/WorkspacePlaceholder.tsx` now scrolls itself. No other module outside the task folder
+  changed except `routing/codec.ts`, which gained metric-id validation after a hand-written test URL
+  with a typo (`coca2020.hp_rank`) crashed a label renderer — a real defect in the link boundary.
+- **Bugs found and fixed during acceptance** (worth knowing for the next table): (1) with
+  `total === null` the virtualiser has `count = 0` and never asks for a window, so window 0 is now
+  fetched by the scope effect itself; (2) a forced refetch after a scope change was swallowed by the
+  in-flight guard while its response was dropped by the generation guard, leaving "统计中…" forever —
+  `force` now bypasses the in-flight guard and the effects depend on keys, not on callback identity;
+  (3) the shell root used `min-h-screen`, so `flex-1`/`h-full` never produced a bounded scroll
+  container and the table grew to 2,464 px instead of 475 px.
+- **Measured in Chromium (real data, dev build, 860×806 viewport)**: 94,954 forms listed, 32 rows in
+  the DOM; jumping to index ≈22,500 / 68,000 / 93,000 (uncached windows) took 377 / 389 / 762 ms
+  until real rows were painted, with **0 long tasks** on the main thread (all scanning/sorting stays
+  in the worker); a 16-step fling across 3.2 M px scrolled in 296 ms and settled in 464 ms after the
+  debounce. A 200-row window costs ≈0.4 s because `runQuery` sorts all matches per request — the
+  known engine-level cost from T01/T03; the UI hides it with windows + debounce, and a faster path
+  would belong in `query.ts`, not here.
+- **Handoff for T06**: the detail panel is still `RefDetail` (minimal). T06 should replace it and
+  reuse `filterState.columnLabel`/`formatMetricValue` for metric cells; row DTO already carries
+  `status`, `badges` and `sources`, so the panels do not need to re-query for them.
 
 ## V2-T06 — Detail panels
 
@@ -443,4 +495,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T05
+NEXT_TASK: V2-T06
