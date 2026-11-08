@@ -43,6 +43,7 @@ export function AppTopBar({ workspace, engineStatus, learningStatus, onOpenSearc
       <button
         type="button"
         onClick={onOpenSearch}
+        aria-label="全局搜索"
         className="group flex min-w-0 items-center gap-2 border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] sm:w-[260px] lg:w-[320px]"
       >
         <Search size={14} aria-hidden />

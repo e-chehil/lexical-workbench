@@ -44,6 +44,17 @@ export function targetForRow(row: RowIdentity): TargetRef | null {
   }
 }
 
+/** Project a learning target to its Form: both `f:work` and `lp:work|noun` live on `f:work`. */
+export function targetToFormRef(target: TargetRef): EntityRef {
+  const parsed = parseRef(target);
+  return parsed.kind === 'lemma_pos_target' ? refs.form(parsed.parts[0] ?? parsed.key) : target;
+}
+
+/** Project a target list to Forms without duplicating a second prefix. */
+export function targetsToFormRefs(targets: readonly TargetRef[]): EntityRef[] {
+  return targets.map(targetToFormRef);
+}
+
 /** Distinct targets in row order; `skipped` keeps the aggregates the caller must explain. */
 export function targetsForRows(rows: readonly RowIdentity[]): TargetMapping {
   const targets: TargetRef[] = [];

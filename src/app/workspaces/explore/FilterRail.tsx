@@ -36,6 +36,7 @@ export function FilterRail({
   const patch = (partial: Partial<ExploreFilters>): void => onChange({ ...value, ...partial });
   const lpOff = kind !== 'coca_lemma_pos';
   const hwOff = kind === 'bnc_family';
+  const statusOff = kind === 'bnc_family' || kind === 'cet_entry';
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -70,6 +71,7 @@ export function FilterRail({
         </Section>
 
         <Section title="学习状态">
+          <div className={statusOff ? 'opacity-55' : undefined}>
           <div className="flex flex-wrap gap-1">
             {STATUS_KEYS.map((status) => (
               <Toggle
@@ -77,18 +79,21 @@ export function FilterRail({
                 active={value.status.includes(status)}
                 label={STATUS_LABELS[status]}
                 onClick={() => patch({ status: toggleValue<LearningStatus>(value.status, status) })}
+                disabled={statusOff}
               />
             ))}
           </div>
           <div className="mt-2 space-y-1">
             <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-              <input type="radio" checked={value.statusResolution === 'effective'} onChange={() => patch({ statusResolution: 'effective' })} />
+              <input type="radio" disabled={statusOff} checked={value.statusResolution === 'effective'} onChange={() => patch({ statusResolution: 'effective' })} />
               有效状态（含继承）
             </label>
             <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-              <input type="radio" checked={value.statusResolution === 'own'} onChange={() => patch({ statusResolution: 'own' })} />
+              <input type="radio" disabled={statusOff} checked={value.statusResolution === 'own'} onChange={() => patch({ statusResolution: 'own' })} />
               仅显式记录
             </label>
+          </div>
+          {statusOff && <p className="mt-1 text-[9px] leading-snug text-[var(--text-muted)]">词族与 CET 词目是聚合单位，没有独立学习目标；请在成员词形上标记。</p>}
           </div>
         </Section>
 
@@ -166,9 +171,9 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Toggle({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function Toggle({ active, label, onClick, disabled = false }: { active: boolean; label: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={active} className={cx('chip !px-1.5 !py-0.5 text-[10px]', active && 'chip-active')}>
+    <button type="button" disabled={disabled} onClick={onClick} aria-pressed={active} className={cx('chip !px-1.5 !py-0.5 text-[10px]', active && 'chip-active', disabled && 'cursor-not-allowed opacity-50')}>
       {label}
     </button>
   );

@@ -14,13 +14,18 @@ export function useAsync<T>(load: () => Promise<T>, key: string, deps: unknown[]
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const generation = useRef(0);
+  const previousKey = useRef(key);
   const loadRef = useRef(load);
   loadRef.current = load;
 
   useEffect(() => {
     const current = ++generation.current;
+    const keyChanged = previousKey.current !== key;
+    previousKey.current = key;
     setLoading(true);
     setError(null);
+    // Never show a previous entity under a new route while its replacement loads.
+    if (keyChanged) setData(null);
     loadRef
       .current()
       .then((value) => {

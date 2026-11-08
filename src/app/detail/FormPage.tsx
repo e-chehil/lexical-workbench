@@ -60,9 +60,12 @@ export function FormPage({ client, entityRef, onClose, onOpenRef, onOpenInExplor
   const [tagsDraft, setTagsDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ text: string; error: boolean } | null>(null);
 
   const record = learning.store?.get(entityRef as TargetRef);
+  useEffect(() => {
+    setSaved(null);
+  }, [entityRef]);
   useEffect(() => {
     setTagsDraft(record?.tags.join(', ') ?? '');
     setNoteDraft(record?.note ?? '');
@@ -115,9 +118,9 @@ export function FormPage({ client, entityRef, onClose, onOpenRef, onOpenInExplor
     setSaved(null);
     try {
       await store.apply([target], patch, { sourceLabel: 'Word page' });
-      setSaved('已写入本机学习库');
+      setSaved({ text: '已写入本机学习库', error: false });
     } catch (cause) {
-      setSaved(cause instanceof Error ? cause.message : String(cause));
+      setSaved({ text: cause instanceof Error ? cause.message : String(cause), error: true });
     } finally {
       setBusy(false);
     }
@@ -307,7 +310,7 @@ export function FormPage({ client, entityRef, onClose, onOpenRef, onOpenInExplor
           )}
 
           <Panel className="p-3">
-            <SectionLabel right={saved ?? undefined}>笔记与标签</SectionLabel>
+            <SectionLabel right={saved ? <span className={saved.error ? 'text-[var(--signal)]' : undefined}>{saved.text}</span> : undefined}>笔记与标签</SectionLabel>
             <label className="mt-2 block">
               <span className="eyebrow">标签（逗号分隔）</span>
               <input className="input mt-1" value={tagsDraft} onChange={(event) => setTagsDraft(event.target.value)} placeholder="例如：学术, 易混" />

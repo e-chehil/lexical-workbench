@@ -39,18 +39,22 @@ export function ProjectionDialog({
     setRefs(null);
     setError(null);
     setBusy(true);
+    let cancelled = false;
     const run = async (): Promise<void> => {
       try {
         const page = await client.query({ ...scope, page: { offset: 0, limit } });
         const projected = await client.project(page.refs, target);
-        setRefs(projected);
+        if (!cancelled) setRefs(projected);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
-        setBusy(false);
+        if (!cancelled) setBusy(false);
       }
     };
     void run();
+    return () => {
+      cancelled = true;
+    };
   }, [open, client, scope, target, limit]);
 
   return (

@@ -146,8 +146,8 @@ test('explore: query → panel round-trips every facet and keeps unknown filters
       hwRank: { max: 20000 },
       band: { min: 1, max: 5 },
       cetLevels: ['CET4', 'CET6'],
-      status: ['queued', 'deferred'],
-      statusResolution: 'own',
+      status: [],
+      statusResolution: 'effective',
       spellingClasses: ['space', 'digit'],
       multiFamily: true,
       extra: [{ type: 'in_refs', refs: ['f:work'] }],
@@ -248,6 +248,15 @@ test('explore: switching kind keeps panel intent but withholds inapplicable rang
     inapplicableFilters(filters, 'bnc_family').map((item) => item.id),
     ['lpRank', 'hwRank']
   );
+
+  // A family has no independent learning target: a status filter is withheld and shown inert.
+  const familyWithStatus: ExploreState = { ...familyState, filters: { ...filters, status: ['unrated'] } };
+  assert.ok(!toLexQuery(familyWithStatus).filters?.some((filter) => filter.type === 'learning_status'));
+  const familyStatus = inapplicableFilters(familyWithStatus.filters, 'bnc_family').find((item) => item.id === 'status');
+  assert.match(familyStatus?.reason ?? '', /聚合单位/);
+  const cetState: ExploreState = { ...state, kind: 'cet_entry', filters: { ...filters, status: ['unrated'] } };
+  assert.ok(!toLexQuery(cetState).filters?.some((filter) => filter.type === 'learning_status'));
+  assert.match(inapplicableFilters(cetState.filters, 'cet_entry').find((item) => item.id === 'status')?.reason ?? '', /多个拼写/);
 });
 
 test('explore: chips list every applicable condition as removable, inapplicable as disabled with a reason', () => {
@@ -273,11 +282,15 @@ test('explore: chips list every applicable condition as removable, inapplicable 
   const rank = familyChips.find((chip) => chip.id === 'hwRank');
   assert.equal(rank?.disabled, true);
   assert.match(rank?.reason ?? '', /词族/);
+  const statusChip = familyChips.find((chip) => chip.id === 'status');
+  assert.equal(statusChip?.disabled, true);
+  assert.match(statusChip?.reason ?? '', /成员词形/);
 
   // Removing a chip clears exactly that condition; an unknown id changes nothing.
   assert.deepEqual(removeFilterChip(filters, 'extra:0').extra, []);
   assert.deepEqual(removeFilterChip(filters, 'cet:CET6').cetLevels, []);
   assert.deepEqual(removeFilterChip(filters, 'hwRank').hwRank, {});
+  assert.deepEqual(removeFilterChip({ ...filters, status: ['unrated', 'queued'] }, 'status').status, []);
   assert.equal(removeFilterChip(filters, 'nonsense'), filters);
 });
 
@@ -287,6 +300,9 @@ test('explore: active facet counting and value formatting', () => {
   // An inapplicable range no longer counts as active for the badge.
   assert.equal(countActiveFilters({ ...EMPTY_FILTERS, lpRank: { max: 1000 } }, 'form'), 0);
   assert.equal(countActiveFilters({ ...EMPTY_FILTERS, lpRank: { max: 1000 } }, 'coca_lemma_pos'), 1);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, status: ['unrated'] }, 'bnc_family'), 0);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, status: ['unrated'] }, 'cet_entry'), 0);
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, status: ['unrated'] }, 'form'), 1);
 
   assert.equal(formatMetricValue('coca2020.lp_freq', 854095), '854,095');
   assert.equal(formatMetricValue('coca2020.lp_rank', 115), '#115');

@@ -90,7 +90,7 @@ npm run dev        # http://localhost:3000
 - Import with `.ts` extensions (existing convention). Keep comments factual and short.
 - Pure logic gets `node:test` tests in `src/v2/tests/` against the **real** data files
   (`loadFullIndex()`); synthetic inputs only for validation/error paths. Add new test files to the
-  `test` and `test:v2` scripts. A test run currently covers 119 cases and takes ~13 s.
+  `test` and `test:v2` scripts. A test run currently covers 120 cases.
 - Worker DTO reads that depend on learning state use `learning.syncedVersion`, not `version`:
   the store commits before the worker acknowledges the snapshot. Explore row windows refresh on
   `syncedVersion` without losing scroll.

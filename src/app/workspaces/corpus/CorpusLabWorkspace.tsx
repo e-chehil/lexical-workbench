@@ -12,11 +12,13 @@ import {
   type AlignmentReport,
   type EntityRef,
   type LexQuery,
+  type TargetRef,
 } from '../../../v2/index.ts';
 import { useEngine } from '../../providers/EngineProvider.tsx';
 import { useLearning } from '../../providers/LearningProvider.tsx';
 import { useRoute } from '../../providers/RouteProvider.tsx';
 import { useCollections } from '../../collections/useCollections.ts';
+import { targetsToFormRefs } from '../explore/selection.ts';
 import { useAsync } from '../../detail/useAsync.ts';
 import { ErrorPanel, LoadingPanel, PageHeader, Panel, SectionLabel, Tabs, cx } from '../../ui/index.tsx';
 import { n, ratio } from '../../ui/format.ts';
@@ -460,19 +462,31 @@ function SetsTab({
   const [bId, setBId] = useState('');
   const [comparison, setComparison] = useState<Awaited<ReturnType<typeof client.compare>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   const runCompare = async (): Promise<void> => {
     const a = collections.items.find((item) => item.id === aId);
     const b = collections.items.find((item) => item.id === bId);
-    if (!a || !b) return;
+    if (!a || !b || comparing) return;
     setError(null);
+    setComparing(true);
     try {
-      const refsOf = (targets: readonly string[]): EntityRef[] => targets.map((target) => (target.startsWith('f:') ? target : `f:${target.slice(3).split('|')[0]}`));
-      const aRefs = a.kind === 'static' ? refsOf(a.targets) : (await client.query({ ...a.query, page: { offset: 0, limit: 5000 } })).refs;
-      const bRefs = b.kind === 'static' ? refsOf(b.targets) : (await client.query({ ...b.query, page: { offset: 0, limit: 5000 } })).refs;
+      // `lp:f:work|noun` and `f:work` both live on Form `f:work`; never prefix a second `f:`.
+      const refsOf = (targets: readonly TargetRef[]): EntityRef[] => targetsToFormRefs(targets);
+      const allRefs = async (query: LexQuery): Promise<EntityRef[]> => {
+        const complete = { ...query };
+        delete complete.page;
+        delete complete.aggregates;
+        return (await client.query(complete)).refs;
+      };
+      // Compare the complete saved result sets; a fixed page would silently compare prefixes.
+      const aRefs = a.kind === 'static' ? refsOf(a.targets) : await allRefs(a.query);
+      const bRefs = b.kind === 'static' ? refsOf(b.targets) : await allRefs(b.query);
       setComparison(await client.compare(aRefs, bRefs, 'form'));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setComparing(false);
     }
   };
 
@@ -525,7 +539,7 @@ function SetsTab({
             <option value="">选择集合 B</option>
             {collections.items.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.kind === 'static' ? item.targets.length : '动态'}）</option>)}
           </select>
-          <button type="button" className="btn btn-primary" disabled={!aId || !bId || aId === bId} onClick={() => void runCompare()}>
+          <button type="button" className="btn btn-primary" disabled={!aId || !bId || aId === bId || comparing} onClick={() => void runCompare()}>
             比较
           </button>
           {collections.items.length === 0 && <span className="text-[10px] text-[var(--text-muted)]">先在 Explore 或 Study 保存一个词集。</span>}

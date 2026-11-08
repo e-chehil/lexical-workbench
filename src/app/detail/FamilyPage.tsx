@@ -17,18 +17,26 @@ export function FamilyPage({ client, entityRef, onClose, onOpenRef, onOpenInExpl
   const learning = useLearning();
   const { data, loading, error } = useAsync(() => client.familyDetail(entityRef), entityRef, [learning.syncedVersion]);
   const [busy, setBusy] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
   const [otherFamilies, setOtherFamilies] = useState<Map<EntityRef, { label: string; band: number | null }>>(new Map());
 
   const write = async (target: TargetRef, status: LearningStatus): Promise<void> => {
     const store = learning.store;
     if (!store) return;
     setBusy(true);
+    setWriteError(null);
     try {
       await store.apply([target], { status }, { sourceLabel: 'Family page' });
+    } catch (cause) {
+      setWriteError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    setWriteError(null);
+  }, [entityRef]);
 
   useEffect(() => {
     if (!data) return;
@@ -82,6 +90,7 @@ export function FamilyPage({ client, entityRef, onClose, onOpenRef, onOpenInExpl
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-4 px-4 py-4">
+          {writeError && <ErrorPanel message={`学习状态写入失败：${writeError}`} />}
           <Panel className="p-3">
             <SectionLabel right={`${data.progress.formsMastered}/${data.progress.formsTotal} 词形`}>掌握进度</SectionLabel>
             <div className="mt-2 flex items-end justify-between gap-3">

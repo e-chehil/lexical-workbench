@@ -49,19 +49,29 @@ export function BulkBar({
   const mapping = targetsForRows(selectedRows);
 
   const exportCsv = (): void => {
-    const header = ['target', 'label', 'kind', 'status', 'reason'];
-    const rows = selectedRows.map((row) => {
-      const target = targetsForRows([row]).targets[0] ?? '';
-      return [target, row.label, row.kind, row.status?.status ?? 'unrated', target ? '' : '聚合实体，无单一目标'];
-    });
+    const header = ['target', 'label', 'kind', 'status'];
+    const rows: (string | number)[][] = [];
+    let skipped = 0;
+    for (const row of selectedRows) {
+      const target = targetsForRows([row]).targets[0];
+      if (!target) {
+        skipped++;
+        continue;
+      }
+      rows.push([target, row.label, row.kind, row.status?.status ?? 'unrated']);
+    }
+    if (rows.length === 0) {
+      onMessage('所选行都是聚合实体，没有可导出的学习目标');
+      return;
+    }
     const blob = new Blob([buildCsv(header, rows)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `lexical-selection-${new Date().toISOString().slice(0, 10)}.csv`;
     anchor.click();
-    URL.revokeObjectURL(url);
-    onMessage(`已导出 ${selectedRows.length} 行 CSV`);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    onMessage(`已导出 ${rows.length} 行 CSV${skipped > 0 ? `（跳过 ${skipped} 个聚合行）` : ''}`);
   };
 
   return (
@@ -104,7 +114,7 @@ export function BulkBar({
             <span className="inline-flex items-center gap-2">
               已记 {receipt.targets} 个目标 → {receipt.statusLabel}
               {receipt.skipped > 0 && ` · 跳过 ${receipt.skipped}`}
-              <button type="button" onClick={onUndoReceipt} className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 hover:text-[var(--lime)]">
+              <button type="button" disabled={busy} onClick={onUndoReceipt} className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 hover:text-[var(--lime)] disabled:opacity-40">
                 <Undo2 size={10} /> 撤销批次 {receipt.batchId.slice(0, 8)}
               </button>
               <button type="button" onClick={onDismissReceipt} aria-label="关闭回执" className="opacity-60 hover:opacity-100"><X size={10} /></button>

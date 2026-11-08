@@ -495,6 +495,23 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 - **T14**: legacy `src/App.tsx`, `src/components`, `src/db`, `src/data`, `src/utils/frequency.ts` removed; CET expansion moved to `src/v2/sources/cetExpansion.ts`; `#/legacy` route removed.
 - **Known deviations**: `setCustomSource` remains a worker control method rather than a typed `LexicalEngineApi` method; the UI always goes through Data Studio. Insights BNC band progress counts distinct member Forms but its drill-down query opens membership slots (the only exact query available without a new filter); this is stated in the panel note.
 
+## Quality acceptance (2026-11-08, pre-release round)
+
+- **Interaction fixes**: modal focus trap/restore; status menu portalled above virtualised rows;
+  detail pages clear stale DTOs on route changes; serialized learning-snapshot pushes; preview and
+  projection requests ignore stale responses; mobile Study scroll and bottom-nav safe padding.
+- **Data correctness**: dynamic collection CSV/JSON exports fetch the complete query (not the 300-row
+  window); aggregate rows are skipped and counted; static collection comparison projects `lp:`
+  targets back to their Form without a doubled prefix; BNC families and CET entries no longer accept
+  an inert learning-status filter.
+- **Accessibility**: nested mobile row buttons removed; file inputs use focusable buttons; search
+  palette and modal restore focus; search button labelled.
+- **Verification**: `npm run lint`, `npm test` (120 tests), `npm run build` and a GitHub Pages build;
+  real-browser checks for filters, detail, status/undo, Study collections/export, Insights, Data
+  Studio, back/forward and an offline reload with the preview server stopped.
+- **Evidence limits**: screenshot capture remains unavailable; custom-source file-picker click was
+  not automated end-to-end. User-data backup intentionally excludes source texts.
+
 ## Change control for public interfaces
 
 | Interface | Owner | May change in |

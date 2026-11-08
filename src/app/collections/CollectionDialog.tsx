@@ -35,12 +35,14 @@ export function CollectionDialog({
   useEffect(() => {
     if (!open) return;
     setName(isDynamic ? '未命名动态词集' : '新词集');
+    setBusy(false);
     setError(null);
     setMessage(null);
   }, [open, isDynamic]);
 
   const done = (text: string): void => {
-    setBusy(false);
+    // Keep the footer disabled until the short confirmation closes; a second click would create
+    // a duplicate collection/append the same targets twice.
     setMessage(text);
     onDone?.(text);
     setTimeout(onClose, 650);
@@ -114,7 +116,7 @@ export function CollectionDialog({
 
         <label className="block">
           <span className="eyebrow">{isDynamic ? '新动态词集名称' : '新建静态词集'}</span>
-          <input className="input mt-1" value={name} onChange={(event) => setName(event.target.value)} />
+          <input className="input mt-1" value={name} onChange={(event) => setName(event.target.value)} onFocus={(event) => event.currentTarget.select()} />
         </label>
 
         <Note>

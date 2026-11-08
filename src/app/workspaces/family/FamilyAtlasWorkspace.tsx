@@ -36,7 +36,14 @@ export function FamilyAtlasWorkspace() {
     return () => clearTimeout(timer);
   }, [text]);
 
-  const selectedFamily = route.ref && kindOf(route.ref) === 'bnc_family' ? route.ref : null;
+  const selectedFamily = (() => {
+    if (!route.ref) return null;
+    try {
+      return kindOf(route.ref) === 'bnc_family' ? route.ref : null;
+    } catch {
+      return null;
+    }
+  })();
   const sort = SORTS.find((option) => option.id === sortId)?.sort;
   const query = useMemo<LexQuery>(() => {
     const next: LexQuery = { kind: 'bnc_family', sort: sort ? [sort] : undefined };
@@ -74,8 +81,13 @@ export function FamilyAtlasWorkspace() {
         description="25,002 个词族按官方频段组织。选一个词族查看成员频次、族内占比与掌握进度；成员状态属于词形，不属于词族。"
         actions={
           selectedFamily && detail.data ? (
-            <button type="button" className="btn btn-primary" onClick={() => prepareCollection(detail.data!)}>
-              <FolderPlus size={13} /> 按默认成员加入词集
+            <button
+              type="button"
+              className="btn btn-primary"
+              title="只加入频次大于 0 且尚未掌握或暂缓的成员词形"
+              onClick={() => prepareCollection(detail.data!)}
+            >
+              <FolderPlus size={13} /> 加入未掌握成员
             </button>
           ) : undefined
         }

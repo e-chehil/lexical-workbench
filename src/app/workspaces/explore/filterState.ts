@@ -243,7 +243,10 @@ export function toQueryFilters(filters: ExploreFilters, kind: EntityKind): Query
   if (band) out.push(band);
 
   if (filters.cetLevels.length > 0) out.push({ type: 'cet_level', levels: [...filters.cetLevels] });
-  if (filters.status.length > 0) {
+  // A BNC family is an aggregate: it has no independent learning target, so a status filter
+  // would always match zero rows. The panel keeps the intent visible as a disabled chip instead.
+  const statusApplies = kind !== 'bnc_family' && kind !== 'cet_entry';
+  if (filters.status.length > 0 && statusApplies) {
     out.push({ type: 'learning_status', statuses: [...filters.status], resolution: filters.statusResolution });
   }
   if (filters.spellingClasses.length > 0) {
@@ -512,6 +515,16 @@ export function inapplicableFilters(filters: ExploreFilters, kind: EntityKind): 
   if (!isRangeEmpty(filters.hwRank) && kind === 'bnc_family') {
     out.push({ id: 'hwRank', label: rangeChipLabel('词头排名（计算）', filters.hwRank), reason: 'COCA 词头排名不会提升到 BNC 词族' });
   }
+  if (filters.status.length > 0 && (kind === 'bnc_family' || kind === 'cet_entry')) {
+    out.push({
+      id: 'status',
+      label: `学习状态（${filters.status.length} 项）`,
+      reason:
+        kind === 'bnc_family'
+          ? 'BNC 词族是聚合单位，没有独立学习目标；请在成员词形上标记状态'
+          : 'CET 词目可链接多个拼写，没有单一独立状态；请在关联词形上标记状态',
+    });
+  }
   return out;
 }
 
@@ -570,13 +583,18 @@ export function filterChips(filters: ExploreFilters, kind: EntityKind): FilterCh
   for (const level of filters.cetLevels) {
     chips.push({ id: `cet:${level}`, label: level, removable: true, disabled: false });
   }
-  for (const status of filters.status) {
-    chips.push({
-      id: `status:${status}`,
-      label: filters.statusResolution === 'own' ? `${STATUS_LABELS[status]}（仅显式）` : STATUS_LABELS[status],
-      removable: true,
-      disabled: false,
-    });
+  const statusInactive = inactive.find((item) => item.id === 'status');
+  if (statusInactive) {
+    chips.push({ id: 'status', label: statusInactive.label, removable: true, disabled: true, reason: statusInactive.reason });
+  } else {
+    for (const status of filters.status) {
+      chips.push({
+        id: `status:${status}`,
+        label: filters.statusResolution === 'own' ? `${STATUS_LABELS[status]}（仅显式）` : STATUS_LABELS[status],
+        removable: true,
+        disabled: false,
+      });
+    }
   }
   for (const cls of filters.spellingClasses) {
     chips.push({ id: `spelling:${cls}`, label: `拼写 ${SPELLING_CLASS_LABELS[cls]}`, removable: true, disabled: false });
@@ -614,7 +632,7 @@ export function removeFilterChip(filters: ExploreFilters, id: string): ExploreFi
     case 'cet':
       return { ...filters, cetLevels: filters.cetLevels.filter((item) => item !== tail) };
     case 'status':
-      return { ...filters, status: filters.status.filter((item) => item !== tail) };
+      return { ...filters, status: tail === '' ? [] : filters.status.filter((item) => item !== tail) };
     case 'spelling':
       return { ...filters, spellingClasses: filters.spellingClasses.filter((item) => item !== tail) };
     case 'multiPos':
@@ -637,7 +655,8 @@ function splitChipId(id: string): [string, string] {
 export function countActiveFilters(filters: ExploreFilters, kind: EntityKind): number {
   const inactive = new Set(inapplicableFilters(filters, kind).map((item) => item.id));
   let count = filters.sourcesPresent.length + filters.sourcesAbsent.length;
-  count += filters.pos.length + filters.cetLevels.length + filters.status.length + filters.spellingClasses.length;
+  count += filters.pos.length + filters.cetLevels.length + filters.spellingClasses.length;
+  if (kind !== 'bnc_family' && kind !== 'cet_entry') count += filters.status.length;
   if (!inactive.has('lpRank') && !isRangeEmpty(filters.lpRank)) count += 1;
   if (!inactive.has('hwRank') && !isRangeEmpty(filters.hwRank)) count += 1;
   if (!isRangeEmpty(filters.band)) count += 1;

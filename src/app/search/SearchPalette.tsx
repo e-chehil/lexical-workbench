@@ -19,6 +19,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const [term, setTerm] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const search = useSearch(client, status, term);
 
   const groups = useMemo(() => groupHits(search.hits), [search.hits]);
@@ -30,8 +31,12 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       setActiveIndex(0);
       return;
     }
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (previous?.isConnected) previous.focus();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -62,12 +67,31 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     }
   };
 
+  const onPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'Tab') return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const items = [...panel.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')].filter((element) => element.offsetParent !== null);
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   let runningIndex = -1;
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center bg-[#101613]/55 px-4 pt-[7vh]" onMouseDown={onClose}>
       <div
         className="rise-in w-full max-w-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-[0_24px_80px_rgba(16,22,19,0.28)]"
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={onPanelKeyDown}
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="全局搜索"

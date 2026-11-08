@@ -128,7 +128,8 @@ function readRef(value: string | null): EntityRef | undefined {
     return undefined;
   }
   try {
-    parseRef(decoded); // throws for anything that is not an entity/learning-target ref
+    const parsed = parseRef(decoded); // throws for anything that is not a ref
+    if (parsed.kind === 'lemma_pos_target') return undefined; // route refs are entities, not targets
     return decoded;
   } catch {
     return undefined;

@@ -39,7 +39,7 @@ import {
   type ExploreFilters,
   type ExploreState,
 } from './filterState.ts';
-import { targetsForRows } from './selection.ts';
+import { targetForRow, targetsForRows } from './selection.ts';
 import { Modal } from '../../ui/index.tsx';
 import { n } from '../../ui/format.ts';
 
@@ -153,7 +153,7 @@ export function ExploreWorkspace() {
 
   const writeStatus = useCallback(
     async (actionRows: EntityRowDTO[], status: LearningStatus): Promise<void> => {
-      if (actionRows.length === 0) return;
+      if (actionRows.length === 0 || busy) return;
       const { targets, skipped } = targetsForRows(actionRows);
       if (targets.length === 0) {
         setMessage('这些聚合实体没有单一学习目标：BNC 词族需先选定成员词形');
@@ -169,6 +169,17 @@ export function ExploreWorkspace() {
       try {
         const batchId = await store.apply(targets, { status }, { sourceLabel: 'Explore' });
         setReceipt({ batchId, targets: targets.length, skipped: skipped.length, statusLabel: STATUS_LABELS[status], undone: false });
+        // Keep the selection DTOs truthful for the bulk bar / CSV export; the table itself is
+        // refreshed from the worker after the snapshot acknowledgement.
+        setSelected((previous) => {
+          const next = new Map(previous);
+          for (const row of actionRows) {
+            if (!next.has(row.ref)) continue;
+            const target = targetForRow(row);
+            next.set(row.ref, { ...row, status: { status, origin: 'own', from: target } });
+          }
+          return next;
+        });
         window.setTimeout(() => rows.refresh(), 140);
       } catch (cause) {
         setMessage(cause instanceof Error ? cause.message : String(cause));
@@ -176,7 +187,7 @@ export function ExploreWorkspace() {
         setBusy(false);
       }
     },
-    [learning.store, rows]
+    [busy, learning.store, rows]
   );
 
   const applyStatusKey = useCallback(
@@ -198,6 +209,9 @@ export function ExploreWorkspace() {
     try {
       const restored = await store.undoBatch(receipt.batchId);
       setReceipt((previous) => (previous ? { ...previous, undone: true } : previous));
+      // A receipt's previous states are not kept in the row DTOs; clear the selection instead
+      // of exporting a stale status after an undo.
+      setSelected(new Map());
       setMessage(`已撤销：恢复 ${restored} 个目标之前的状态`);
       window.setTimeout(() => rows.refresh(), 140);
     } catch (cause) {
@@ -208,12 +222,27 @@ export function ExploreWorkspace() {
   }, [learning.store, receipt, rows]);
 
   useEffect(() => {
-    if (!filterSheetOpen || engineStatus !== 'ready') return;
+    if (!filterSheetOpen) {
+      setPreviewTotal(null);
+      return;
+    }
+    if (engineStatus !== 'ready') return;
+    let cancelled = false;
     const timer = setTimeout(() => {
       const query = { ...toLexQuery({ ...state, filters: draftFilters }), page: { offset: 0, limit: 0 } };
-      void client.query(query).then((result: QueryResult) => setPreviewTotal(result.total)).catch(() => setPreviewTotal(null));
+      void client
+        .query(query)
+        .then((result: QueryResult) => {
+          if (!cancelled) setPreviewTotal(result.total);
+        })
+        .catch(() => {
+          if (!cancelled) setPreviewTotal(null);
+        });
     }, PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [filterSheetOpen, engineStatus, client, state, draftFilters]);
 
   const selectedRows = useMemo(() => [...selected.values()], [selected]);
@@ -298,6 +327,7 @@ export function ExploreWorkspace() {
             loading={rows.loading}
             error={rows.error}
             empty={emptyMessage}
+            statusDisabled={!learning.store}
           />
 
           {(selectedRows.length > 0 || receipt) && (

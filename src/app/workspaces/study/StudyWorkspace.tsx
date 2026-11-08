@@ -1,5 +1,5 @@
 /**
- * Study workspace: collections, a target queue, the explainable planner and CSV export.
+ * Study workspace: collections, a target queue, the explainable planner and CSV/JSON export.
  *
  * Static collections store explicit targets; dynamic collections store a query and are re-evaluated
  * on every read. A plan is a preview until the user explicitly saves it as a collection.
@@ -7,10 +7,13 @@
 import { useEffect, useState } from 'react';
 import { Download, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
 import {
+  metricDisplayLabel,
   type Collection,
   type EntityRef,
   type EntityRowDTO,
   type LearningStatus,
+  type MetricCell,
+  type MetricId,
   type PlanItem,
   type PlanRequest,
   type StrategyId,
@@ -43,7 +46,46 @@ const SCOPES: { id: string; label: string; scope?: PlanRequest['scope'] }[] = [
   { id: 'band1to3', label: 'BNC 频段 1k–3k', scope: { kind: 'bnc_family', filters: [{ type: 'metric_range', metric: 'bnc25k.family_band', min: 1, max: 3 }] } },
 ];
 
-const QUEUE_COLUMNS = ['coca2020.lp_rank', 'bnc25k.member_freq', 'bnc25k.family_band'] as const;
+const QUEUE_COLUMNS = ['coca2020.hw_rank', 'coca2020.lp_rank', 'bnc25k.member_freq', 'bnc25k.family_band'] as const;
+
+interface ExportMetric {
+  metric: MetricId;
+  label: string;
+  value: number | null;
+}
+
+interface ExportRecord {
+  target: TargetRef;
+  label: string;
+  status: string;
+  tags: string[];
+  note: string;
+  studyCount: number;
+  lastStudiedAt: string | null;
+  metrics: ExportMetric[];
+}
+
+function exportMetrics(cells: readonly MetricCell[]): ExportMetric[] {
+  return QUEUE_COLUMNS.map((metric) => ({
+    metric,
+    label: metricDisplayLabel(metric),
+    value: cells.find((cell) => cell.metric === metric)?.value ?? null,
+  }));
+}
+
+function downloadText(filename: string, text: string, type: string): void {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function safeFileName(name: string): string {
+  return name.replace(/[\/:*?"<>|]/g, '_').trim() || 'study-queue';
+}
 
 export function StudyWorkspace() {
   const { client, status } = useEngine();
@@ -61,6 +103,7 @@ export function StudyWorkspace() {
   const [planTargets, setPlanTargets] = useState<TargetRef[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,7 +121,7 @@ export function StudyWorkspace() {
     }
     const page = await client.rows({ query: { ...selected.query, page: { offset: 0, limit: 300 } }, columns: [...QUEUE_COLUMNS] });
     return { kind: 'dynamic' as const, rows: page.rows, total: page.total };
-  }, selected?.id ?? 'none', [client, status, selected?.id, learning.syncedVersion]);
+  }, selected ? `${selected.id}:${selected.updatedAt}` : 'none', [client, status, selected?.id, selected?.updatedAt, learning.syncedVersion]);
 
   const planLabels = useAsync(
     () => (plan && plan.length > 0 ? client.resolveTargets(plan.map((item) => item.target)) : Promise.resolve([])),
@@ -103,37 +146,133 @@ export function StudyWorkspace() {
 
   const writeStatus = async (target: TargetRef, learningStatus: LearningStatus): Promise<void> => {
     if (!learning.store) return;
-    await learning.store.apply([target], { status: learningStatus }, { sourceLabel: 'Study queue' });
+    try {
+      await learning.store.apply([target], { status: learningStatus }, { sourceLabel: 'Study queue' });
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   const study = async (target: TargetRef): Promise<void> => {
     if (!learning.store) return;
-    await learning.store.apply([target], { studied: true }, { sourceLabel: 'Study queue' });
-    setMessage('已记录一次学习');
+    try {
+      await learning.store.apply([target], { studied: true }, { sourceLabel: 'Study queue' });
+      setMessage('已记录一次学习');
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
-  const exportCollection = (): void => {
-    if (!queue.data) return;
-    const staticRows = queue.data.kind === 'static' ? queue.data.targets : [];
-    const dynamicRows = queue.data.kind === 'dynamic' ? queue.data.rows : [];
-    const header = ['target', 'label', 'status', 'tags', 'note', 'studyCount', 'lastStudiedAt'];
-    const rows: (string | number)[][] = [];
+  const loadExportRecords = async (): Promise<{ records: ExportRecord[]; skipped: number }> => {
+    if (!selected || !queue.data) return { records: [], skipped: 0 };
+    const records: ExportRecord[] = [];
+    let skipped = 0;
+
     if (queue.data.kind === 'static') {
-      for (const row of staticRows) rows.push([row.target, row.label, row.status.status, row.tags.join('; '), row.note, row.studyCount, row.lastStudiedAt ?? '']);
+      for (const row of queue.data.targets) {
+        records.push({
+          target: row.target,
+          label: row.label,
+          status: row.status.status,
+          tags: [...row.tags],
+          note: row.note,
+          studyCount: row.studyCount,
+          lastStudiedAt: row.lastStudiedAt,
+          metrics: exportMetrics(row.metrics),
+        });
+      }
     } else {
-      for (const row of dynamicRows) {
-        const target = targetsForRows([row]).targets[0] ?? '';
-        rows.push([target, row.label, row.status?.status ?? 'unrated', '', '', 0, '']);
+      if (selected.kind !== 'dynamic') return { records: [], skipped: 0 };
+      // The visible queue is capped at 300 rows for interaction. Export must not silently
+      // export that window: ask the engine for the full dynamic result.
+      const fullQuery = { ...selected.query };
+      delete fullQuery.page;
+      delete fullQuery.aggregates;
+      const full = await client.rows({ query: fullQuery, columns: [...QUEUE_COLUMNS] });
+      for (const row of full.rows) {
+        const target = targetsForRows([row]).targets[0];
+        if (!target) {
+          skipped++;
+          continue;
+        }
+        records.push({
+          target,
+          label: row.label,
+          status: row.status?.status ?? 'unrated',
+          tags: [],
+          note: '',
+          studyCount: 0,
+          lastStudiedAt: null,
+          metrics: exportMetrics(row.metrics),
+        });
       }
     }
-    const blob = new Blob([buildCsv(header, rows)], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${selected?.name ?? 'study-queue'}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setMessage(`已导出 ${rows.length} 行 CSV`);
+    return { records, skipped };
+  };
+
+  const exportCollection = async (): Promise<void> => {
+    if (!selected || !queue.data) return;
+    setExporting(true);
+    setMessage(null);
+    try {
+      const { records, skipped } = await loadExportRecords();
+      if (records.length === 0) {
+        setMessage('没有可导出的学习目标（聚合行不会写入 CSV）');
+        return;
+      }
+      const header = [
+        'target',
+        'label',
+        'status',
+        'tags',
+        'note',
+        'studyCount',
+        'lastStudiedAt',
+        ...QUEUE_COLUMNS.map((metric) => metricDisplayLabel(metric)),
+      ];
+      const rows = records.map((record) => [
+        record.target,
+        record.label,
+        record.status,
+        record.tags.join('; '),
+        record.note,
+        record.studyCount,
+        record.lastStudiedAt,
+        ...record.metrics.map((metric) => metric.value),
+      ]);
+      downloadText(`${safeFileName(selected.name)}.csv`, buildCsv(header, rows), 'text/csv;charset=utf-8');
+      setMessage(`已导出 ${records.length} 行 CSV${skipped > 0 ? `（跳过 ${skipped} 个无单一目标的聚合行）` : ''}`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportJson = async (): Promise<void> => {
+    if (!selected || !queue.data) return;
+    setExporting(true);
+    setMessage(null);
+    try {
+      const { records, skipped } = await loadExportRecords();
+      if (records.length === 0) {
+        setMessage('没有可导出的学习目标（聚合行不会写入 JSON）');
+        return;
+      }
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        collection: { name: selected.name, kind: selected.kind },
+        columns: QUEUE_COLUMNS.map((metric) => ({ metric, label: metricDisplayLabel(metric) })),
+        records,
+      };
+      downloadText(`${safeFileName(selected.name)}.json`, JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
+      setMessage(`已导出 ${records.length} 条 JSON${skipped > 0 ? `（跳过 ${skipped} 个无单一目标的聚合行）` : ''}`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setExporting(false);
+    }
   };
 
   const addPlanToSelected = async (): Promise<void> => {
@@ -142,6 +281,7 @@ export function StudyWorkspace() {
     try {
       await collections.addTargets(selected.id, planTargets);
       setMessage(`已加入 ${planTargets.length} 个目标到「${selected.name}」`);
+      setPlanTargets([]);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -151,8 +291,12 @@ export function StudyWorkspace() {
 
   const deleteCollection = async (collection: Collection): Promise<void> => {
     if (!window.confirm(`删除词集「${collection.name}」？学习记录不会被删除。`)) return;
-    await collections.remove(collection.id);
-    setSelectedId(null);
+    try {
+      await collections.remove(collection.id);
+      setSelectedId(null);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   return (
@@ -164,12 +308,13 @@ export function StudyWorkspace() {
         actions={
           <>
             <button type="button" className="btn" onClick={() => setCreateOpen(true)}><Plus size={13} /> 新建词集</button>
-            <button type="button" className="btn" onClick={exportCollection} disabled={!queue.data}><Download size={13} /> 导出 CSV</button>
+            <button type="button" className="btn" onClick={() => void exportCollection()} disabled={!queue.data || exporting}><Download size={13} /> {exporting ? '导出中…' : '导出 CSV'}</button>
+            <button type="button" className="btn" onClick={() => void exportJson()} disabled={!queue.data || exporting}><Download size={13} /> 导出 JSON</button>
           </>
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
         <aside className="flex w-full shrink-0 flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] xl:w-[260px] xl:border-b-0 xl:border-r">
           <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2.5">
             <p className="eyebrow">Collections · {collections.items.length}</p>
@@ -196,7 +341,7 @@ export function StudyWorkspace() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <section className="flex min-h-[280px] min-w-0 flex-1 flex-col xl:min-h-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-4 py-2">
             <div className="min-w-0">
               <p className="truncate font-display text-lg font-semibold">{selected?.name ?? '未选择词集'}</p>
@@ -220,12 +365,12 @@ export function StudyWorkspace() {
             {!selected && <EmptyState title="还没有打开的词集" detail="用右侧规划器生成候选，或先在 Explore 选择目标加入词集。" />}
             {selected && queue.loading && !queue.data && <LoadingPanel label="读取学习目标…" />}
             {selected && queue.error && <div className="p-4"><ErrorPanel message={queue.error} /></div>}
-            {queue.data?.kind === 'static' && <StaticQueue rows={queue.data.targets} onOpen={(ref) => navigate({ workspace: 'study', ref })} onStatus={(target, status) => void writeStatus(target, status)} onStudy={(target) => void study(target)} />}
-            {queue.data?.kind === 'dynamic' && <DynamicQueue rows={queue.data.rows} total={queue.data.total} onOpen={(ref) => navigate({ workspace: 'study', ref })} onStatus={(target, status) => void writeStatus(target, status)} />}
+            {queue.data?.kind === 'static' && <StaticQueue key={selected?.id ?? 'static'} rows={queue.data.targets} onOpen={(ref) => navigate({ workspace: 'study', ref })} onStatus={(target, status) => void writeStatus(target, status)} onStudy={(target) => void study(target)} disabled={!learning.store} />}
+            {queue.data?.kind === 'dynamic' && <DynamicQueue rows={queue.data.rows} total={queue.data.total} onOpen={(ref) => navigate({ workspace: 'study', ref })} onStatus={(target, status) => void writeStatus(target, status)} disabled={!learning.store} />}
           </div>
         </section>
 
-        <aside className="flex w-full shrink-0 flex-col border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] xl:w-[330px] xl:border-l xl:border-t-0">
+        <aside className="flex max-h-[55vh] w-full shrink-0 flex-col border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] xl:max-h-none xl:w-[330px] xl:border-l xl:border-t-0">
           <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
             <p className="eyebrow">Planner · preview only</p>
             <p className="mt-1 font-display text-[17px] font-semibold">下一批学什么</p>
@@ -289,11 +434,19 @@ export function StudyWorkspace() {
   );
 }
 
-function StaticQueue({ rows, onOpen, onStatus, onStudy }: { rows: TargetRowDTO[]; onOpen: (ref: EntityRef) => void; onStatus: (target: TargetRef, status: LearningStatus) => void; onStudy: (target: TargetRef) => void }) {
+function StaticQueue({ rows, onOpen, onStatus, onStudy, disabled }: { rows: TargetRowDTO[]; onOpen: (ref: EntityRef) => void; onStatus: (target: TargetRef, status: LearningStatus) => void; onStudy: (target: TargetRef) => void; disabled: boolean }) {
+  const [visible, setVisible] = useState(300);
   if (rows.length === 0) return <EmptyState title="这个静态词集还没有成员" detail="从 Explore 选择目标加入，或把规划器预览保存为词集。" />;
+  const shown = rows.slice(0, visible);
   return (
-    <ul>
-      {rows.map((row) => (
+    <div>
+      {rows.length > visible && (
+        <p className="border-b border-[var(--border-subtle)] px-3 py-1.5 font-mono-tabular text-[10px] text-[var(--text-muted)]">
+          显示前 {visible} / {rows.length} 条
+        </p>
+      )}
+      <ul>
+        {shown.map((row) => (
         <li key={row.target} className="roster-row flex items-center gap-2 px-3 py-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2">
@@ -302,21 +455,29 @@ function StaticQueue({ rows, onOpen, onStatus, onStudy }: { rows: TargetRowDTO[]
               {row.entityRef === null && <span className="chip !px-1 !py-0 text-[9px] text-[var(--signal)]">孤立目标</span>}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              {row.metrics.filter((cell) => cell.value !== null).map((cell) => <span key={cell.metric} className="font-mono-tabular">{cell.label} {n(cell.value)}</span>)}
+              {row.metrics
+                .filter((cell) => cell.value !== null && (row.kind === 'form' ? cell.metric !== 'coca2020.lp_rank' : cell.metric !== 'coca2020.hw_rank'))
+                .map((cell) => <span key={cell.metric} className="font-mono-tabular">{cell.label} {n(cell.value)}</span>)}
               {row.tags.length > 0 && <span>#{row.tags.join(' #')}</span>}
               {row.studyCount > 0 && <span>学习 {row.studyCount} 次 · {dateTime(row.lastStudiedAt)}</span>}
             </div>
           </div>
-          <button type="button" className="btn px-2 py-1 text-[10px]" onClick={() => onStudy(row.target)}><Play size={10} /> 学习</button>
-          <StatusControl status={row.status} compact onSet={(status) => onStatus(row.target, status)} />
+          <button type="button" className="btn px-2 py-1 text-[10px]" disabled={disabled} onClick={() => onStudy(row.target)}><Play size={10} /> 学习</button>
+          <StatusControl status={row.status} compact disabled={disabled} disabledReason="本地学习库不可用" onSet={(status) => onStatus(row.target, status)} />
           {row.entityRef && <button type="button" className="btn btn-ghost px-1.5 py-1 text-[10px]" onClick={() => onOpen(row.entityRef!)}>详情</button>}
         </li>
       ))}
-    </ul>
+      </ul>
+      {rows.length > visible && (
+        <button type="button" className="btn m-3" onClick={() => setVisible((count) => Math.min(rows.length, count + 300))}>
+          载入更多（剩余 {rows.length - visible} 条）
+        </button>
+      )}
+    </div>
   );
 }
 
-function DynamicQueue({ rows, total, onOpen, onStatus }: { rows: EntityRowDTO[]; total: number; onOpen: (ref: EntityRef) => void; onStatus: (target: TargetRef, status: LearningStatus) => void }) {
+function DynamicQueue({ rows, total, onOpen, onStatus, disabled }: { rows: EntityRowDTO[]; total: number; onOpen: (ref: EntityRef) => void; onStatus: (target: TargetRef, status: LearningStatus) => void; disabled: boolean }) {
   if (rows.length === 0) return <EmptyState title="动态词集当前没有匹配" detail="查询条件可能过窄，或学习状态变化让集合缩小。" />;
   return (
     <div>
@@ -332,10 +493,12 @@ function DynamicQueue({ rows, total, onOpen, onStatus }: { rows: EntityRowDTO[];
                   <span className="font-mono-tabular text-[9px] text-[var(--text-faint)]">{row.kind}</span>
                 </div>
                 <div className="mt-0.5 flex gap-2 text-[10px] text-[var(--text-muted)]">
-                  {row.metrics.filter((cell) => cell.value !== null).map((cell) => <span key={cell.metric} className="font-mono-tabular">{cell.label} {n(cell.value)}</span>)}
+                  {row.metrics
+                .filter((cell) => cell.value !== null && (row.kind === 'form' ? cell.metric !== 'coca2020.lp_rank' : cell.metric !== 'coca2020.hw_rank'))
+                .map((cell) => <span key={cell.metric} className="font-mono-tabular">{cell.label} {n(cell.value)}</span>)}
                 </div>
               </div>
-              {target ? <StatusControl status={row.status} compact onSet={(status) => onStatus(target, status)} /> : <span className="text-[10px] italic text-[var(--text-muted)]">聚合</span>}
+              {target ? <StatusControl status={row.status} compact disabled={disabled} disabledReason="本地学习库不可用" onSet={(status) => onStatus(target, status)} /> : <span className="text-[10px] italic text-[var(--text-muted)]">聚合</span>}
               <button type="button" className="btn btn-ghost px-1.5 py-1 text-[10px]" onClick={() => onOpen(row.ref)}>详情</button>
             </li>
           );

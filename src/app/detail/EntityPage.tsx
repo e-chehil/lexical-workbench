@@ -66,6 +66,7 @@ export function EntityPage({ client, entityRef, onClose, onOpenRef, onOpenInExpl
   const config = CONFIG[kind];
   const [row, setRow] = useState<EntityRowDTO | null>(null);
   const [groups, setGroups] = useState<{ title: string; rows: EntityRowDTO[] }[]>([]);
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   const { data, loading, error } = useAsync(async () => {
     const [self, ...projected] = await Promise.all([
@@ -85,16 +86,25 @@ export function EntityPage({ client, entityRef, onClose, onOpenRef, onOpenInExpl
   }, entityRef, [learning.syncedVersion]);
 
   useEffect(() => {
-    if (data) {
-      setRow(data.self);
-      setGroups(data.related);
-    }
+    setWriteError(null);
+  }, [entityRef]);
+
+  useEffect(() => {
+    // `useAsync` clears data when the entity key changes; clear the derived view too so a
+    // previous entity never stays visible (or writable) under a new route.
+    setRow(data?.self ?? null);
+    setGroups(data?.related ?? []);
   }, [data]);
 
   const write = async (target: ReturnType<typeof targetForRow>, status: LearningStatus): Promise<void> => {
     const store = learning.store;
     if (!store || !target) return;
-    await store.apply([target], { status }, { sourceLabel: 'Entity page' });
+    setWriteError(null);
+    try {
+      await store.apply([target], { status }, { sourceLabel: 'Entity page' });
+    } catch (cause) {
+      setWriteError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   if (loading && !row) {
@@ -127,6 +137,7 @@ export function EntityPage({ client, entityRef, onClose, onOpenRef, onOpenInExpl
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-4 px-4 py-4">
+          {writeError && <ErrorPanel message={`学习状态写入失败：${writeError}`} />}
           <Panel className="p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <SectionLabel>{KIND_TITLES[kind]?.title ?? '来源实体'}</SectionLabel>

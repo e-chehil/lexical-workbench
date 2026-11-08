@@ -52,7 +52,8 @@ export function DetailHost({ client, entityRef, onClose, onOpenRef, onOpenInExpl
   useEffect(() => {
     if (!entityRef || (tablet && wide && pinned)) return;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
+      // A menu or modal inside the panel owns Escape first; do not close the detail behind it.
+      if (event.key === 'Escape' && !document.querySelector('[role="dialog"], [role="menu"]')) onClose();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);

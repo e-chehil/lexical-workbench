@@ -73,7 +73,7 @@ export function InsightsWorkspace() {
               <SectionLabel>词族与考纲覆盖</SectionLabel>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <CoverageCard label="词族 · 全部成员掌握" value={data.status.bncFamilies.masteredAll} total={data.status.bncFamilies.total} onOpen={() => open({ kind: 'bnc_family' })} note="聚合单位：词族" />
-                <CoverageCard label="词族 · 至少一个成员" value={data.status.bncFamilies.masteredAny} total={data.status.bncFamilies.total} onOpen={() => open({ kind: 'bnc_family' })} note="任一成员已掌握" />
+                <CoverageCard label="词族 · 部分成员掌握" value={data.status.bncFamilies.masteredAny} total={data.status.bncFamilies.total} onOpen={() => open({ kind: 'bnc_family' })} note="有成员已掌握，但未全部" />
                 <CoverageCard label="CET · 全部拼写掌握" value={data.status.cetEntries.full} total={data.status.cetEntries.total} onOpen={() => open({ kind: 'cet_entry' })} note="整条词目" />
                 <CoverageCard label="CET · 部分拼写掌握" value={data.status.cetEntries.partial} total={data.status.cetEntries.total} onOpen={() => open({ kind: 'cet_entry' })} note="非全部" />
               </div>
@@ -103,6 +103,7 @@ export function InsightsWorkspace() {
                 </button>
               ))}
             </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-muted)]">计数按去重词形；点击一个频段会打开该频段的成员槽，因为引擎查询以成员槽为单位。</p>
           </Panel>
 
           <div className="grid gap-3 xl:grid-cols-2">

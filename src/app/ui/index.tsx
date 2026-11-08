@@ -4,7 +4,7 @@
  * These are deliberately flat: hairline rules, mono eyebrows and one signal colour. Workspaces
  * compose them instead of introducing a second visual language.
  */
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import type { EffectiveStatus, LearningStatus } from '../../v2/index.ts';
 
@@ -175,19 +175,57 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = panelRef.current;
+    const focusables = (): HTMLElement[] =>
+      panel
+        ? [...panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(
+            (element) => element.offsetParent !== null
+          )
+        : [];
+    const initial =
+      panel?.querySelector<HTMLElement>('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])') ?? focusables()[0] ?? panel;
+    initial?.focus();
+
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !panel?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-[#101613]/50 px-4 pt-[8vh]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-[#101613]/50 px-4 pt-[8vh]" onMouseDown={() => onCloseRef.current()}>
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className={`rise-in w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} border border-[var(--border-strong)] bg-[var(--bg-elevated)]`}
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"

@@ -6,7 +6,7 @@
  * previous index in service. A successful replacement is persisted in `customSources` and applied
  * again on the next visit.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Database, Download, RefreshCw, Upload } from 'lucide-react';
 import {
   SOURCE_INFO,
@@ -36,7 +36,7 @@ const SECTIONS = ['来源与诊断', '三源对齐', '自定义数据源', '用�
 type Section = (typeof SECTIONS)[number];
 
 export function DataStudioWorkspace() {
-  const { client, status, ready, retry } = useEngine();
+  const { client, status, ready, retry, refreshReady } = useEngine();
   const learning = useLearning();
   const collections = useCollections(learning.db, learning.version);
   const { navigate } = useRoute();
@@ -46,6 +46,8 @@ export function DataStudioWorkspace() {
   const [customSource, setCustomSource] = useState<SourceId>('coca2020');
   const [codeFilter, setCodeFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const customFileRef = useRef<HTMLInputElement | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
 
   const report = useAsync(() => (status === 'ready' ? client.insights() : Promise.resolve(null)), 'data-insights', [client, status, refreshing]);
   const alignment = useAsync(() => (status === 'ready' ? client.alignment() : Promise.resolve(null)), 'data-alignment', [client, status, refreshing]);
@@ -72,6 +74,8 @@ export function DataStudioWorkspace() {
       const text = await file.text();
       const result = await client.setCustomSource(sourceId, text);
       await learning.db.customSources.put({ sourceId, content: text, updatedAt: new Date().toISOString() });
+      await refreshReady();
+      learning.clearCustomSourceError();
       setRefreshing((value) => !value);
       setMessage(`已替换 ${sourceId} 并重建索引（${Math.round(result.buildMs)} ms）。旧数据仍保存在来源文件中。`);
     } catch (cause) {
@@ -83,15 +87,19 @@ export function DataStudioWorkspace() {
 
   const exportUserData = async (): Promise<void> => {
     if (!learning.db) return;
-    const payload = await exportBackup(learning.db);
-    const blob = new Blob([serializeBackup(payload)], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `lexical-workbench-backup-${payload.exportedAt.slice(0, 10)}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setMessage(`已导出 ${payload.records.length} 条记录、${payload.events.length} 条事件、${payload.collections.length} 个词集`);
+    try {
+      const payload = await exportBackup(learning.db);
+      const blob = new Blob([serializeBackup(payload)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `lexical-workbench-backup-${payload.exportedAt.slice(0, 10)}.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setMessage(`已导出 ${payload.records.length} 条记录、${payload.events.length} 条事件、${payload.collections.length} 个词集`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   const importUserData = async (file: File): Promise<void> => {
@@ -158,6 +166,7 @@ export function DataStudioWorkspace() {
                   <input className="input max-w-[220px]" value={codeFilter} onChange={(event) => setCodeFilter(event.target.value)} placeholder="按 code 过滤…" aria-label="诊断过滤" />
                 </div>
                 <DiagnosticTable diagnostics={filteredDiagnostics} />
+                {filteredDiagnostics.length > 300 && <p className="mt-1 text-[10px] text-[var(--text-muted)]">显示前 300 条；完整数量见上方计数。</p>}
               </Panel>
             </>
           )}
@@ -181,20 +190,21 @@ export function DataStudioWorkspace() {
                       {SOURCE_IDS.map((sourceId) => <option key={sourceId} value={sourceId}>{SOURCE_INFO[sourceId].title}</option>)}
                     </select>
                   </label>
-                  <label className="btn cursor-pointer">
+                  <button type="button" className="btn" disabled={busy} onClick={() => customFileRef.current?.click()}>
                     <Upload size={13} /> 选择文件并替换
-                    <input
-                      type="file"
-                      accept={customSource === 'coca2020' ? '.json,application/json' : '.txt,text/plain'}
-                      className="hidden"
-                      disabled={busy}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = '';
-                        if (file) void applyCustomSource(customSource, file);
-                      }}
-                    />
-                  </label>
+                  </button>
+                  <input
+                    ref={customFileRef}
+                    type="file"
+                    accept={customSource === 'coca2020' ? '.json,application/json' : '.txt,text/plain'}
+                    className="hidden"
+                    disabled={busy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (file) void applyCustomSource(customSource, file);
+                    }}
+                  />
                   {busy && <span className="text-[11px] text-[var(--text-muted)]">正在校验并重建…</span>}
                 </div>
                 <Note>
@@ -212,6 +222,7 @@ export function DataStudioWorkspace() {
                 <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">来源替换后，曾经存在的拼写可能不再出现在索引中。记录会保留，并在词集里显示为孤立目标。</p>
                 {orphans.loading && <LoadingPanel />}
                 {orphans.data && orphans.data.length === 0 && <p className="mt-2 text-[11px] text-[var(--seal)]">没有孤立目标。</p>}
+                {orphans.data && orphans.data.length > 100 && <p className="mt-2 text-[10px] text-[var(--text-muted)]">显示前 100 个；共 {orphans.data.length} 个。</p>}
                 {orphans.data && orphans.data.length > 0 && (
                   <ul className="mt-2 divide-y divide-[var(--border-hairline)] border border-[var(--border-subtle)]">
                     {orphans.data.slice(0, 100).map((row) => (
@@ -240,20 +251,21 @@ export function DataStudioWorkspace() {
               <Panel className="p-3">
                 <SectionLabel right="替换模式">导入学习数据</SectionLabel>
                 <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">导入会清空并替换本机全部学习记录、事件和词集；来源文件不受影响。</p>
-                <label className={cx('btn mt-2 cursor-pointer', busy && 'opacity-50')}>
+                <button type="button" className={cx('btn mt-2', busy && 'opacity-50')} disabled={busy || !learning.db} onClick={() => importFileRef.current?.click()}>
                   <Upload size={13} /> 选择备份 JSON
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    className="hidden"
-                    disabled={busy || !learning.db}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      event.target.value = '';
-                      if (file) void importUserData(file);
-                    }}
-                  />
-                </label>
+                </button>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  disabled={busy || !learning.db}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file) void importUserData(file);
+                  }}
+                />
               </Panel>
 
               <Panel className="p-3 xl:col-span-2">
@@ -366,12 +378,15 @@ function AlignmentPanel({ report, onOpen, onOpenRef }: { report: AlignmentReport
               </button>
             ))}
           </div>
+          {report.caseFoldedMatches.length > 12 && (
+            <p className="mt-1 text-[10px] text-[var(--text-muted)]">仅显示前 12 / {report.caseFoldedMatches.length} 个；完整计数以上方为准。</p>
+          )}
         </Panel>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-2">
         <Panel className="p-3">
-          <SectionLabel right={`${report.candidates.diacriticPairs.length} 对`}>变音符候选</SectionLabel>
+          <SectionLabel right={`${report.candidates.diacriticPairs.length} 对 · 显示前 ${Math.min(40, report.candidates.diacriticPairs.length)}`}>变音符候选</SectionLabel>
           <div className="mt-2 flex flex-wrap gap-1">
             {report.candidates.diacriticPairs.slice(0, 40).map((pair) => (
               <span key={`${pair.a}-${pair.b}`} className="chip !px-1.5 !py-0.5 font-mono-tabular text-[9px]">{pair.a} / {pair.b}</span>
@@ -380,7 +395,7 @@ function AlignmentPanel({ report, onOpen, onOpenRef }: { report: AlignmentReport
           <p className="mt-2 text-[10px] text-[var(--text-muted)]">候选关系不参与统计，也不自动合并。</p>
         </Panel>
         <Panel className="p-3">
-          <SectionLabel right={`${report.candidates.hyphenPairs} 对`}>连字符候选</SectionLabel>
+          <SectionLabel right={`${report.candidates.hyphenPairs} 对 · 显示前 ${Math.min(20, report.candidates.hyphenPairSamples.length)}`}>连字符候选</SectionLabel>
           <div className="mt-2 flex flex-wrap gap-1">
             {report.candidates.hyphenPairSamples.slice(0, 20).map((pair) => (
               <span key={`${pair.hyphenated}-${pair.joined}`} className="chip !px-1.5 !py-0.5 font-mono-tabular text-[9px]">{pair.hyphenated} / {pair.joined}</span>
@@ -406,9 +421,14 @@ function CustomSourceList({ db, version, refreshKey }: { db: ReturnType<typeof u
   useEffect(() => {
     if (!db) return;
     let cancelled = false;
-    void db.customSources.toArray().then((items) => {
-      if (!cancelled) setRows(items.map((item) => ({ sourceId: item.sourceId, updatedAt: item.updatedAt, content: item.content })));
-    });
+    void db.customSources
+      .toArray()
+      .then((items) => {
+        if (!cancelled) setRows(items.map((item) => ({ sourceId: item.sourceId, updatedAt: item.updatedAt, content: item.content })));
+      })
+      .catch(() => {
+        if (!cancelled) setRows([]);
+      });
     return () => { cancelled = true; };
   }, [db, version, refreshKey]);
   if (rows.length === 0) return <p className="mt-2 text-[11px] text-[var(--text-muted)]">没有自定义源，正在使用随应用发布的三个文件。</p>;

@@ -19,16 +19,22 @@ export interface EngineContextValue {
   error: EngineClientError | Error | null;
   /** Replaces the worker and starts the session again. */
   retry: () => void;
+  /** Re-reads the worker's source/diagnostic summary after a successful custom-source rebuild. */
+  refreshReady: () => Promise<void>;
 }
 
 const EngineContext = createContext<EngineContextValue | null>(null);
 
 export function EngineProvider({ children }: { children: ReactNode }) {
-  const [client, setClient] = useState<EngineClient>(() => createEngineClient());
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<EngineStatus>('loading');
   const [ready, setReady] = useState<EngineReadyInfo | null>(null);
   const [error, setError] = useState<EngineClientError | Error | null>(null);
+  const handleWorkerError = useCallback((cause: EngineClientError): void => {
+    setError(cause);
+    setStatus('error');
+  }, []);
+  const [client, setClient] = useState<EngineClient>(() => createEngineClient({ onWorkerError: handleWorkerError }));
   const ownedClients = useRef<EngineClient[]>([]);
 
   // Track every client this provider created so a retry/unmount can terminate the old worker.
@@ -58,15 +64,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     };
   }, [client, attempt]);
 
+  const refreshReady = useCallback(async (): Promise<void> => {
+    const info = await client.ready();
+    setReady(info);
+  }, [client]);
+
   const retry = useCallback(() => {
     const previous = ownedClients.current;
-    const next = createEngineClient();
+    const next = createEngineClient({ onWorkerError: handleWorkerError });
     ownedClients.current = [next];
     for (const old of previous) old.terminate();
     setReady(null);
     setClient(next);
     setAttempt((n) => n + 1);
-  }, []);
+  }, [handleWorkerError]);
 
   // Terminating on unmount stops the worker thread (and its ~200 MB index) with the page.
   useEffect(
@@ -76,7 +87,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const value = useMemo<EngineContextValue>(() => ({ client, status, ready, error, retry }), [client, status, ready, error, retry]);
+  const value = useMemo<EngineContextValue>(() => ({ client, status, ready, error, retry, refreshReady }), [client, status, ready, error, retry, refreshReady]);
   return <EngineContext.Provider value={value}>{children}</EngineContext.Provider>;
 }
 

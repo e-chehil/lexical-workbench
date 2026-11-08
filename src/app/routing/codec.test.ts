@@ -118,6 +118,7 @@ test('codec: unreadable query or ref is dropped instead of throwing', () => {
   assert.deepEqual(decodeRoute('#/explore?ref=not-a-ref'), { workspace: 'explore' });
   // A valid ref next to an invalid query keeps the ref.
   assert.deepEqual(decodeRoute('#/explore?q=x&ref=f%3Awork'), { workspace: 'explore', ref: 'f:work' });
+  assert.deepEqual(decodeRoute('#/explore?ref=lp%3Af%3Awork%7Cnoun'), { workspace: 'explore' }, 'learning targets are not entity refs');
 });
 
 test('codec: query validation accepts the protocol and rejects wrong shapes', () => {

@@ -100,6 +100,7 @@ export function useRowsWindow({ client, engineStatus, scope, columns, aggregates
         .then((page) => {
           if (generation.current !== requestGeneration) return; // a newer scope already won
           windowsRef.current.set(windowIndex, page.rows);
+          setError(null);
           setState((prev) => ({
             total: page.total,
             aggregates: page.aggregates.length > 0 ? page.aggregates : prev.aggregates,
@@ -147,6 +148,13 @@ export function useRowsWindow({ client, engineStatus, scope, columns, aggregates
   fetchRef.current = fetchWindow;
   ensureRef.current = ensureRange;
 
+  useEffect(
+    () => () => {
+      if (rangeTimer.current !== null) window.clearTimeout(rangeTimer.current);
+    },
+    []
+  );
+
   const refresh = useCallback(() => {
     for (const index of [...windowsRef.current.keys()]) fetchWindow(index, true);
   }, [fetchWindow]);
@@ -176,7 +184,13 @@ export function useRowsWindow({ client, engineStatus, scope, columns, aggregates
   useEffect(() => {
     if (lastStatusVersion.current === statusVersion) return;
     lastStatusVersion.current = statusVersion;
-    for (const index of [...windowsRef.current.keys()]) fetchRef.current(index, true);
+    // Invalidate responses already in flight: a status refresh must not be overwritten by a
+    // snapshot that was requested before the new learning state reached the worker.
+    generation.current += 1;
+    const loaded = [...windowsRef.current.keys()];
+    // On first mount the initial window may still be in flight; reload window 0 explicitly so a
+    // status acknowledgement cannot leave an empty roster behind.
+    for (const index of loaded.length > 0 ? loaded : [0]) fetchRef.current(index, true);
   }, [statusVersion]);
 
   // Column change: same rows, new cells. Forced reload replaces the cached DTOs in place.

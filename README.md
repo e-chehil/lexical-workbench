@@ -15,7 +15,7 @@
 | **Explore** | 六类实体（词形 / COCA 词头 / COCA 词性记录 / BNC 词族 / BNC 成员 / CET 词目）的统一检索、筛选、排序、批量标注与投影集合 |
 | **Corpus Lab** | 官方排行、词性分布、排名 × 频次曲线、派生词头排名 × BNC 频段交叉表、三源 Venn 与集合比较 |
 | **Family Atlas** | 25,002 个词族的目录、成员频次 / 族内占比、掌握进度、按成员加入词集 |
-| **Study** | 静态 / 动态词集、学习队列、四种可解释规划策略、CSV 导出 |
+| **Study** | 静态 / 动态词集、学习队列、四种可解释规划策略、CSV / JSON 导出 |
 | **Insights** | 按单位分开的学习状态、COCA / BNC 频次加权覆盖率、频段推进、事件时间线 |
 | **Data Studio** | 来源卡片与诊断、三源对齐、自定义来源替换、孤立目标审计、用户数据备份/导入 |
 
@@ -75,8 +75,9 @@ npm run build      # 生产构建
 npm run audit:v2   # 重新生成 docs/v2/data-audit.generated.json
 ```
 
-生产构建支持 GitHub Pages 子路径：`npm run build:gh-pages`（`GITHUB_BASE` / `VITE_BASE_PATH`
-逻辑见 `vite.config.ts`）。
+生产构建支持 GitHub Pages 子路径：Git Bash/macOS 用 `npm run build:gh-pages`；PowerShell 用
+`$env:GITHUB_PAGES='true'; $env:VITE_BASE_PATH='/lexical-workbench/'; npm run build`（逻辑见
+`vite.config.ts`）。
 
 ---
 
@@ -93,7 +94,7 @@ npm run audit:v2   # 重新生成 docs/v2/data-audit.generated.json
 
 - 学习状态、标签、笔记、学习次数、事件日志、静态 / 动态词集和自定义来源都在本机 IndexedDB。
 - **Data Studio → 用户数据** 可以导出 `version: 2` JSON 备份；导入为**替换模式**，导入前会完整校验，
-  失败不会清空现有数据。
+  失败不会清空现有数据。备份只包含学习记录、事件和词集，不包含来源文本。
 - 替换来源文件时先由适配器解析并在 Worker 中构建新索引，成功后才提交；失败继续使用当前来源。
 - PWA 离线缓存来源文件、字体与应用资源；不向第三方字体或分析服务发请求。
 

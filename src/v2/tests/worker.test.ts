@@ -275,7 +275,7 @@ test('loadBrowser: overrides skip the fetch, and load failures are coded per sou
     });
 
   await expectLoadError(
-    loadSourceTexts({ fetcher: ((url: string) => Promise.resolve(new Response('', { status: 404 }))) as unknown as typeof fetch }),
+    loadSourceTexts({ fetcher: (() => Promise.resolve(new Response('', { status: 404 }))) as unknown as typeof fetch }),
     'source_load_failed',
     'coca2020'
   );

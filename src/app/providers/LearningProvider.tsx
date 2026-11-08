@@ -27,6 +27,8 @@ export interface LearningContextValue {
   /** True after every persisted custom source has been applied to the worker index. */
   customSourcesReady: boolean;
   customSourceError: string | null;
+  /** Clears a boot-time custom-source warning after a successful replacement. */
+  clearCustomSourceError: () => void;
   status: LearningStatus;
   error: Error | null;
   /** Re-opens the database after a failure. */
@@ -38,7 +40,7 @@ export interface LearningContextValue {
 const LearningContext = createContext<LearningContextValue | null>(null);
 
 export function LearningProvider({ children }: { children: ReactNode }) {
-  const { client, status: engineStatus } = useEngine();
+  const { client, status: engineStatus, refreshReady } = useEngine();
   const [db, setDb] = useState<LexicalWorkbenchDB | null>(null);
   const [store, setStore] = useState<DexieLearningStore | null>(null);
   const [records, setRecords] = useState<LearningRecord[]>([]);
@@ -50,6 +52,8 @@ export function LearningProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
   const storeRef = useRef<DexieLearningStore | null>(null);
+  // Serialize snapshot pushes: a later write must never be overwritten by an older in-flight sync.
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
@@ -101,9 +105,11 @@ export function LearningProvider({ children }: { children: ReactNode }) {
     const current = storeRef.current;
     if (!current || status !== 'ready' || engineStatus !== 'ready') return;
     const snapshotVersion = version;
-    void client
-      .syncLearning([...current.all()])
-      .then(() => setSyncedVersion(snapshotVersion))
+    const snapshot = [...current.all()];
+    syncChainRef.current = syncChainRef.current
+      .catch(() => undefined)
+      .then(() => client.syncLearning(snapshot))
+      .then(() => setSyncedVersion((previous) => Math.max(previous, snapshotVersion)))
       .catch(() => {
         // A rejected sync leaves the previous worker snapshot in place; the next change retries.
       });
@@ -120,6 +126,7 @@ export function LearningProvider({ children }: { children: ReactNode }) {
       .then(async (rows) => {
         for (const row of rows) await client.setCustomSource(row.sourceId, row.content);
         if (!cancelled) {
+          await refreshReady();
           setCustomSourceError(null);
           setCustomSourcesReady(true);
         }
@@ -132,9 +139,10 @@ export function LearningProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [db, status, engineStatus, client]);
+  }, [db, status, engineStatus, client, refreshReady]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const clearCustomSourceError = useCallback(() => setCustomSourceError(null), []);
 
   const recentEvents = useCallback(async () => {
     const current = storeRef.current;
@@ -143,8 +151,8 @@ export function LearningProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<LearningContextValue>(
-    () => ({ store, db, records, version, syncedVersion, customSourcesReady, customSourceError, status, error, reload, recentEvents }),
-    [store, db, records, version, syncedVersion, customSourcesReady, customSourceError, status, error, reload, recentEvents]
+    () => ({ store, db, records, version, syncedVersion, customSourcesReady, customSourceError, clearCustomSourceError, status, error, reload, recentEvents }),
+    [store, db, records, version, syncedVersion, customSourcesReady, customSourceError, clearCustomSourceError, status, error, reload, recentEvents]
   );
   return <LearningContext.Provider value={value}>{children}</LearningContext.Provider>;
 }

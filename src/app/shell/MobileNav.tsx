@@ -1,7 +1,7 @@
 /**
  * Mobile navigation: four bottom slots plus a sheet for the remaining workspaces.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MoreHorizontal, X } from 'lucide-react';
 import type { WorkspaceId } from '../routing/codec.ts';
 import { MOBILE_MORE, MOBILE_PRIMARY, WORKSPACE_META } from './workspaceMeta.ts';
@@ -14,6 +14,15 @@ export interface MobileNavProps {
 export function MobileNav({ active, onSelect }: MobileNavProps) {
   const [open, setOpen] = useState(false);
   const moreActive = MOBILE_MORE.includes(active);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
 
   return (
     <>

@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { refs, type EntityRowDTO, type EntityKind, type EntityRef } from '../../../v2/index.ts';
-import { refsBetween, targetForRow, targetsForRows } from './selection.ts';
+import { refsBetween, targetForRow, targetsForRows, targetsToFormRefs } from './selection.ts';
 
 const row = (ref: EntityRef, kind: EntityKind, formRef: EntityRef | null): Pick<EntityRowDTO, 'ref' | 'kind' | 'formRef'> => ({
   ref,
@@ -61,4 +61,8 @@ test('selection: Shift range is inclusive, clamped and order-independent', () =>
   assert.deepEqual(refsBetween(refsList, -5, 1), ['f:a', 'f:b']);
   assert.deepEqual(refsBetween(refsList, 3, 99), ['f:d']);
   assert.deepEqual(refsBetween([], 0, 3), []);
+});
+
+test('selection: a PoS target projects to its Form for collection comparison', () => {
+  assert.deepEqual(targetsToFormRefs(['f:work', 'lp:work|noun', 'lp:work|verb']), ['f:work', 'f:work', 'f:work']);
 });

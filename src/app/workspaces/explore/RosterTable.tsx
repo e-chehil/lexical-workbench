@@ -52,6 +52,7 @@ export interface RosterTableProps {
   loading: boolean;
   error: string | null;
   empty: EmptyMessage | null;
+  statusDisabled?: boolean;
 }
 
 export function RosterTable({
@@ -71,6 +72,7 @@ export function RosterTable({
   loading,
   error,
   empty,
+  statusDisabled = false,
 }: RosterTableProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const count = total ?? 0;
@@ -94,7 +96,9 @@ export function RosterTable({
   }, [focusedIndex, count, virtualizer]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (count === 0) return;
+    // Only the grid itself owns roster navigation; keys from a checkbox, open button or status
+    // menu must not also toggle/select the focused row.
+    if (event.target !== event.currentTarget || count === 0) return;
     const focus = (next: number): void => onFocusIndex(Math.max(0, Math.min(count - 1, next)));
     switch (event.key) {
       case 'ArrowDown':
@@ -237,7 +241,7 @@ export function RosterTable({
                           );
                         })}
                         <div role="gridcell" className="flex items-center justify-end border-l border-[var(--border-hairline)] px-1.5">
-                          <StatusControl status={row.status} compact disabled={aggregateKind} onSet={(status) => onSetRowStatus(row, status)} />
+                          <StatusControl status={row.status} compact disabled={aggregateKind || statusDisabled} disabledReason={statusDisabled ? '本地学习库不可用' : undefined} onSet={(status) => onSetRowStatus(row, status)} />
                         </div>
                       </div>
 
@@ -250,6 +254,7 @@ export function RosterTable({
                             onOpenRow(row);
                           }}
                           className="min-w-0 flex-1 py-1 text-left"
+                          aria-label={`打开 ${row.label}`}
                         >
                           <span className="flex items-baseline gap-1.5">
                             <span className="font-mono-tabular text-[10px] text-[var(--text-muted)]">
@@ -267,9 +272,11 @@ export function RosterTable({
                                 </span>
                               );
                             })}
-                            <span className="ml-auto"><StatusControl status={row.status} compact disabled={aggregateKind} onSet={(status) => onSetRowStatus(row, status)} /></span>
                           </span>
                         </button>
+                        <span className="shrink-0">
+                          <StatusControl status={row.status} compact disabled={aggregateKind || statusDisabled} disabledReason={statusDisabled ? '本地学习库不可用' : undefined} onSet={(status) => onSetRowStatus(row, status)} />
+                        </span>
                       </div>
                     </>
                   ) : (

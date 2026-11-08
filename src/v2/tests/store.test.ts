@@ -173,7 +173,7 @@ test('undoEvents restores the state before the batch, oldest before-value winnin
   const step1 = applyPatch(original, 'f:work', { status: 'mastered' }, T1, 'batch-1');
   const step2 = applyPatch(step1.record, 'f:work', { status: 'deferred', tags: ['later'] }, T2, 'batch-1');
 
-  const plan = undoEvents([step2.events[1], step2.events[0], step1.events[0]], (t) => step2.record, T3, 'revert:batch-1');
+  const plan = undoEvents([step2.events[1], step2.events[0], step1.events[0]], () => step2.record, T3, 'revert:batch-1');
 
   assert.deepEqual(plan.deleteTargets, []);
   assert.deepEqual(plan.skipped, []);
