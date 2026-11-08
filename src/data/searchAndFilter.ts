@@ -1,6 +1,8 @@
-import {
+import { getCocaPosMeta } from './types.ts';
+import type {
   BncCocaFamily,
   CetOfficialEntry,
+  CocaLexemeRecord,
   DictionaryTemplate,
   FilterCriteria,
   LearningStatus,
@@ -11,6 +13,7 @@ import {
 
 export const DEFAULT_FILTER_CRITERIA: FilterCriteria = {
   searchQuery: '',
+  searchMatchMode: 'auto',
   sourceFilter: 'all',
   bands: [],
   minBand: null,
@@ -21,6 +24,13 @@ export const DEFAULT_FILTER_CRITERIA: FilterCriteria = {
   maxFamilyFreq: null,
   includeUnrankedFreq: true,
   includeZeroFreq: true,
+  cocaRankMode: 'derived_headword',
+  minCocaRank: null,
+  maxCocaRank: null,
+  minCocaFreq: null,
+  maxCocaFreq: null,
+  cocaPosFilter: [],
+  cocaMultiPosOnly: false,
   statuses: [],
   tags: [],
   tagFilterMode: 'any',
@@ -88,8 +98,6 @@ export const DEFAULT_DICTIONARIES: DictionaryTemplate[] = [
 
 /**
  * Builds an external dictionary URL from a word and template.
- * Tolerates either `(word, urlTemplate)` or `(urlTemplate, word)` argument order,
- * and strips ★ and homograph superscripts (¹ ² ³ ⁴ ⁵).
  */
 export function buildDictionaryUrl(arg1: string, arg2: string): string {
   const isArg1Template = arg1.includes('{word}') || arg1.startsWith('http');
@@ -104,12 +112,6 @@ export function buildDictionaryUrl(arg1: string, arg2: string): string {
   return template.replace('{word}', encodeURIComponent(cleanedWord));
 }
 
-/**
- * Closed-class ultra-high-frequency grammar particles / single-letter suffixes
- * that appear at the top of raw BNC 1k frequency lists ("the", "of", "and", "to", "s", etc.)
- * and should be deprioritized in the default "Recommended Study Priority" sort
- * so learners immediately see meaningful CET-4/CET-6 & core content vocabulary.
- */
 export const CLOSED_CLASS_STOPWORDS = new Set([
   'the', 'be', 'am', 'is', 'are', 'was', 'were', 'been', 'being',
   'of', 'and', 'a', 'an', 'in', 'to', 'have', 'has', 'had', 'having',
@@ -123,14 +125,11 @@ export const CLOSED_CLASS_STOPWORDS = new Set([
   'out', 'no', 'nor', 'yes', 'now', 'there', 'here', 'when', 'where', 'why', 'how',
   'all', 'one', 'some', 'any', 'every', 'each', 'much', 'many', 'more', 'most',
   'other', 'another', 'such', 'own', 'same', 'both', 'two', 'three', 'four', 'five',
-  's', 't', 'd', 'm', 're', 've', 'll', 'oh', 'yeah', 'uh', 'um', 'ok', 'okay',
+  's', 't', 'd', 'm', 're', 've', 'll', 'oh', 'yeah', 'uh', 'um', 'ok', 'okay', "n't",
 ]);
 
 /**
  * Computes study priority score & human-readable reason for sorting and batch planning.
- * Already mastered or deferred words return score 0.
- * Closed-class particles and 1-letter tokens are heavily penalized so substantive content words
- * (e.g. able, ability, accept, account...) lead the recommended study order.
  */
 export function computeStudyPriorityScore(
   word: LexiconWordItem,
@@ -157,6 +156,19 @@ export function computeStudyPriorityScore(
   } else if (word.isCet6) {
     score += 340;
     reasons.push('CET-6 进阶');
+  }
+
+  // COCA high-frequency signal (kept distinct from BNC band signal)
+  if (word.inCoca && word.cocaHeadwordDerivedRank !== null && word.cocaHeadwordDerivedRank !== undefined) {
+    if (word.cocaHeadwordDerivedRank <= 3000) {
+      score += 180;
+      reasons.push(`COCA #${word.cocaHeadwordDerivedRank}`);
+    } else if (word.cocaHeadwordDerivedRank <= 8000) {
+      score += 100;
+      reasons.push(`COCA #${word.cocaHeadwordDerivedRank}`);
+    } else if (word.cocaHeadwordDerivedRank <= 15000) {
+      score += 45;
+    }
   }
 
   if (word.bandNumber !== null) {
@@ -205,7 +217,309 @@ export function computeStudyPriorityScore(
 }
 
 /**
- * Multi-dimensional filtering and sorting across 76k+ lexicon items.
+ * Multi-Objective Study Planner Strategy Types & Explainable Candidate Scoring
+ */
+export type MultiObjectiveStrategyId =
+  | 'coca_high_freq'
+  | 'bnc_family_value'
+  | 'cet_syllabus'
+  | 'high_freq_gap'
+  | 'family_completion'
+  | 'custom_multi_objective';
+
+export interface MultiObjectiveWeights {
+  cocaWeight: number; // 0..100
+  bncWeight: number; // 0..100
+  cetWeight: number; // 0..100
+  gapWeight: number; // 0..100
+}
+
+export interface StudyPlanCandidate {
+  word: LexiconWordItem;
+  status: LearningStatus;
+  // Separate, transparent 0..100 dimension scores (never mixing raw corpus frequencies!)
+  dimensions: {
+    cocaValue: number; // 0..100 based on COCA rank
+    bncFamilyValue: number; // 0..100 based on BNC band & family size
+    examRelevance: number; // 0..100 based on CET-4 / CET-6 / CET family peers
+    knowledgeGapValue: number; // 0..100 based on status, unmastered high-freq gap, or family completion
+  };
+  compositeScore: number; // Weighted sum of the 0..100 normalized dimensions
+  isParetoOptimal: boolean; // True if no other candidate dominates this word across all 4 dimensions
+  explainableReasons: string[];
+}
+
+export function computeMultiObjectiveStudyCandidates(
+  words: LexiconWordItem[],
+  familiesMap: Map<string, BncCocaFamily>,
+  userRecordsMap: Map<string, UserWordRecord>,
+  options: {
+    strategy: MultiObjectiveStrategyId;
+    customWeights?: MultiObjectiveWeights;
+    excludeStopwords?: boolean;
+    onlyHeadwords?: boolean;
+    maxCandidatesPool?: number;
+  }
+): StudyPlanCandidate[] {
+  const excludeStopwords = options.excludeStopwords ?? true;
+  const onlyHeadwords = options.onlyHeadwords ?? false;
+
+  // Pre-compute family mastery ratios for family_completion & gap evaluation
+  const familyMasteryStats = new Map<
+    string,
+    { masteredCount: number; totalCount: number; ratio: number }
+  >();
+  for (const fam of familiesMap.values()) {
+    let mastered = 0;
+    for (const m of fam.members) {
+      if (userRecordsMap.get(m.normalized)?.status === 'mastered') {
+        mastered++;
+      }
+    }
+    familyMasteryStats.set(fam.id, {
+      masteredCount: mastered,
+      totalCount: fam.members.length,
+      ratio: fam.members.length > 0 ? mastered / fam.members.length : 0,
+    });
+  }
+
+  let weights: MultiObjectiveWeights = {
+    cocaWeight: 35,
+    bncWeight: 25,
+    cetWeight: 25,
+    gapWeight: 15,
+  };
+
+  switch (options.strategy) {
+    case 'coca_high_freq':
+      weights = { cocaWeight: 70, bncWeight: 10, cetWeight: 10, gapWeight: 10 };
+      break;
+    case 'bnc_family_value':
+      weights = { cocaWeight: 15, bncWeight: 65, cetWeight: 10, gapWeight: 10 };
+      break;
+    case 'cet_syllabus':
+      weights = { cocaWeight: 20, bncWeight: 15, cetWeight: 55, gapWeight: 10 };
+      break;
+    case 'high_freq_gap':
+      weights = { cocaWeight: 45, bncWeight: 20, cetWeight: 15, gapWeight: 20 };
+      break;
+    case 'family_completion':
+      weights = { cocaWeight: 15, bncWeight: 30, cetWeight: 15, gapWeight: 40 };
+      break;
+    case 'custom_multi_objective':
+      if (options.customWeights) {
+        weights = options.customWeights;
+      }
+      break;
+  }
+
+  const totalW =
+    Math.max(1, weights.cocaWeight + weights.bncWeight + weights.cetWeight + weights.gapWeight);
+
+  const candidates: StudyPlanCandidate[] = [];
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const rec = userRecordsMap.get(w.id);
+    const status: LearningStatus = rec?.status || 'unrated';
+
+    // Skip already mastered or deferred words
+    if (status === 'mastered' || status === 'deferred') continue;
+
+    if (excludeStopwords && (w.normalized.length <= 1 || CLOSED_CLASS_STOPWORDS.has(w.normalized))) {
+      continue;
+    }
+    if (onlyHeadwords && !w.isHeadword && !w.inCoca) {
+      continue;
+    }
+
+    // Strategy-specific hard pre-filters so each strategy focuses on relevant candidates
+    if (options.strategy === 'coca_high_freq' && !w.inCoca) continue;
+    if (options.strategy === 'bnc_family_value' && !w.inBnc) continue;
+    if (options.strategy === 'cet_syllabus' && !w.inCet) continue;
+    if (options.strategy === 'high_freq_gap') {
+      const isCocaHigh = w.inCoca && (w.cocaHeadwordDerivedRank ?? 99999) <= 8000;
+      const isBncHigh = w.inBnc && (w.bandNumber ?? 99) <= 4;
+      if (!isCocaHigh && !isBncHigh) continue;
+    }
+    if (options.strategy === 'family_completion') {
+      if (!w.familyId) continue;
+      const famStat = familyMasteryStats.get(w.familyId);
+      if (!famStat || famStat.masteredCount === 0 || famStat.masteredCount === famStat.totalCount) {
+        continue;
+      }
+    }
+
+    // Dimension 1: COCA High-Frequency Value (0..100)
+    let cocaValue = 0;
+    const cocaRank = w.cocaHeadwordDerivedRank ?? w.cocaBestPosRank ?? null;
+    if (w.inCoca && cocaRank !== null) {
+      if (cocaRank <= 1000) cocaValue = 100 - Math.round((cocaRank / 1000) * 8);
+      else if (cocaRank <= 3000) cocaValue = 92 - Math.round(((cocaRank - 1000) / 2000) * 12);
+      else if (cocaRank <= 5000) cocaValue = 80 - Math.round(((cocaRank - 3000) / 2000) * 12);
+      else if (cocaRank <= 10000) cocaValue = 68 - Math.round(((cocaRank - 5000) / 5000) * 18);
+      else if (cocaRank <= 20000) cocaValue = 50 - Math.round(((cocaRank - 10000) / 10000) * 20);
+      else cocaValue = Math.max(5, 30 - Math.round(((cocaRank - 20000) / 40000) * 25));
+      if ((w.cocaPosCount || 0) >= 3) {
+        cocaValue = Math.min(100, cocaValue + 4);
+      }
+    }
+
+    // Dimension 2: BNC Word Family Value (0..100)
+    let bncFamilyValue = 0;
+    if (w.bandNumber !== null) {
+      const bandBase = Math.max(4, Math.round(((26 - w.bandNumber) / 25) * 78));
+      const memberBonus = Math.min(14, (w.familyMemberCount || 1) * 2);
+      const headBonus = w.isHeadword ? 8 : 0;
+      bncFamilyValue = Math.min(100, bandBase + memberBonus + headBonus);
+    }
+
+    // Dimension 3: CET Exam Relevance (0..100)
+    let examRelevance = 0;
+    if (w.isCet4) {
+      examRelevance = 100;
+    } else if (w.isCet6Only || w.isCet6) {
+      examRelevance = 84;
+    } else if (w.familyCetMemberCount > 0) {
+      examRelevance = Math.min(48, 20 + w.familyCetMemberCount * 8);
+    }
+
+    // Dimension 4: Personal Knowledge Gap & Family Completion (0..100)
+    let knowledgeGapValue = 25;
+    const famStat = w.familyId ? familyMasteryStats.get(w.familyId) : undefined;
+    if (status === 'queued') knowledgeGapValue += 30;
+    else if (status === 'learning') knowledgeGapValue += 20;
+
+    if (famStat && famStat.masteredCount > 0 && famStat.ratio < 1) {
+      knowledgeGapValue += Math.round(famStat.ratio * 42);
+    }
+    if ((cocaRank !== null && cocaRank <= 5000) || (w.bandNumber !== null && w.bandNumber <= 3)) {
+      knowledgeGapValue += 22;
+    }
+    knowledgeGapValue = Math.min(100, knowledgeGapValue);
+
+    const compositeScore = Number(
+      (
+        (cocaValue * weights.cocaWeight +
+          bncFamilyValue * weights.bncWeight +
+          examRelevance * weights.cetWeight +
+          knowledgeGapValue * weights.gapWeight) /
+        totalW
+      ).toFixed(1)
+    );
+
+    const explainableReasons: string[] = [];
+    if (w.inCoca && cocaRank !== null) {
+      explainableReasons.push(
+        `COCA 词头排名 #${cocaRank.toLocaleString()}${
+          (w.cocaPosCount || 0) > 1 ? ` (${w.cocaPosCount}词性)` : ` (${w.cocaPrimaryPos})`
+        }`
+      );
+    }
+    if (w.isCet4) {
+      explainableReasons.push('CET-4 大纲核心');
+    } else if (w.isCet6) {
+      explainableReasons.push(w.isCet6Only ? 'CET-6 新增核心' : 'CET-6 大纲词');
+    }
+    if (w.band) {
+      explainableReasons.push(
+        `BNC ${w.band} ${w.isHeadword ? `族首词 (统领${w.familyMemberCount || 1}词)` : `派生词 (族:${w.headword})`}`
+      );
+    }
+    if (famStat && famStat.masteredCount > 0 && famStat.masteredCount < famStat.totalCount) {
+      explainableReasons.push(
+        `词族已掌握 ${famStat.masteredCount}/${famStat.totalCount} 词（补全高价值余项）`
+      );
+    }
+
+    candidates.push({
+      word: w,
+      status,
+      dimensions: {
+        cocaValue,
+        bncFamilyValue,
+        examRelevance,
+        knowledgeGapValue,
+      },
+      compositeScore,
+      isParetoOptimal: false,
+      explainableReasons,
+    });
+  }
+
+  // Sort by compositeScore descending, then COCA rank ascending, then normalized
+  candidates.sort((a, b) => {
+    if (b.compositeScore !== a.compositeScore) return b.compositeScore - a.compositeScore;
+    const ra = a.word.cocaHeadwordDerivedRank ?? 999999;
+    const rb = b.word.cocaHeadwordDerivedRank ?? 999999;
+    if (ra !== rb) return ra - rb;
+    return a.word.normalized.localeCompare(b.word.normalized);
+  });
+
+  const topPool = candidates.slice(0, options.maxCandidatesPool ?? 300);
+
+  // Compute Pareto Frontier among the top candidate pool
+  for (let i = 0; i < topPool.length; i++) {
+    const a = topPool[i].dimensions;
+    let dominated = false;
+    for (let j = 0; j < topPool.length; j++) {
+      if (i === j) continue;
+      const b = topPool[j].dimensions;
+      const bGeAll =
+        b.cocaValue >= a.cocaValue &&
+        b.bncFamilyValue >= a.bncFamilyValue &&
+        b.examRelevance >= a.examRelevance &&
+        b.knowledgeGapValue >= a.knowledgeGapValue;
+      const bStrictOne =
+        b.cocaValue > a.cocaValue ||
+        b.bncFamilyValue > a.bncFamilyValue ||
+        b.examRelevance > a.examRelevance ||
+        b.knowledgeGapValue > a.knowledgeGapValue;
+      if (bGeAll && bStrictOne) {
+        dominated = true;
+        break;
+      }
+    }
+    topPool[i].isParetoOptimal = !dominated;
+  }
+
+  return topPool;
+}
+
+/**
+ * Levenshtein distance <= 1 check for fuzzy search.
+ */
+export function isEditDistanceAtMostOne(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+    } else {
+      edits++;
+      if (edits > 1) return false;
+      if (la > lb) i++;
+      else if (lb > la) j++;
+      else {
+        i++;
+        j++;
+      }
+    }
+  }
+  if (i < la || j < lb) edits++;
+  return edits <= 1;
+}
+
+/**
+ * Multi-dimensional filtering and sorting across 94k+ lexicon items (Headwords & Forms views).
  */
 export function filterAndSortWords(
   words: LexiconWordItem[],
@@ -216,11 +530,16 @@ export function filterAndSortWords(
 ): LexiconWordItem[] {
   const q = criteria.searchQuery.trim().toLowerCase();
   const cleanQ = q.replace(/★/g, '').replace(/[¹²³⁴⁵]/g, '');
+  const matchMode = criteria.searchMatchMode || 'auto';
   const bandsSet = criteria.bands.length > 0 ? new Set(criteria.bands) : null;
   const statusSet = criteria.statuses.length > 0 ? new Set(criteria.statuses) : null;
   const requiredTags = criteria.tags;
+  const posFilterSet =
+    criteria.cocaPosFilter && criteria.cocaPosFilter.length > 0
+      ? new Set(criteria.cocaPosFilter)
+      : null;
+  const cocaRankMode = criteria.cocaRankMode || 'derived_headword';
 
-  // Pre-compute families with at least one mastered member if needed
   let unmasteredHighFreqFamilyIds: Set<string> | null = null;
   if (criteria.familyFilter === 'high_freq_unmastered_member' && familiesMap) {
     unmasteredHighFreqFamilyIds = new Set<string>();
@@ -238,7 +557,7 @@ export function filterAndSortWords(
     const rec = userRecordsMap.get(w.id);
     const status: LearningStatus = rec?.status || 'unrated';
 
-    // 1. Source filter
+    // 1. Source filter (3-source aware)
     switch (criteria.sourceFilter) {
       case 'cet_all':
         if (!w.inCet) continue;
@@ -247,24 +566,40 @@ export function filterAndSortWords(
         if (!w.isCet4) continue;
         break;
       case 'cet6':
-        // All CET-6 words (including homographs shared with CET-4 like ★appropriate²)
         if (!w.isCet6) continue;
         break;
       case 'cet6_new':
-        // Strictly CET-6 only words (excluding CET-4 words)
         if (!w.isCet6Only) continue;
         break;
       case 'bnc_all':
         if (!w.inBnc && !w.bncLinkedViaVariant) continue;
         break;
+      case 'coca_all':
+        if (!w.inCoca) continue;
+        break;
       case 'both_cet_bnc':
         if (!w.inCet || (!w.inBnc && !w.bncLinkedViaVariant)) continue;
         break;
+      case 'both_cet_coca':
+        if (!w.inCet || !w.inCoca) continue;
+        break;
+      case 'both_bnc_coca':
+        if (!w.inBnc || !w.inCoca) continue;
+        break;
+      case 'all_three_sources':
+        if (!w.inCet || !w.inBnc || !w.inCoca) continue;
+        break;
       case 'cet_only':
-        if (!w.inCet || w.inBnc || w.bncLinkedViaVariant) continue;
+        if (!w.inCet || w.inBnc || w.bncLinkedViaVariant || w.inCoca) continue;
         break;
       case 'bnc_only':
-        if (!w.inBnc || w.inCet) continue;
+        if (!w.inBnc || w.inCet || w.inCoca) continue;
+        break;
+      case 'coca_only':
+        if (!w.inCoca || w.inBnc || w.inCet) continue;
+        break;
+      case 'cet_not_in_coca':
+        if (!w.inCet || w.inCoca) continue;
         break;
     }
 
@@ -279,7 +614,7 @@ export function filterAndSortWords(
       if (w.bandNumber === null || w.bandNumber > criteria.maxBand) continue;
     }
 
-    // 3. Frequency filters
+    // 3. BNC Frequency filters
     if (!criteria.includeUnrankedFreq && w.formFrequency === null) continue;
     if (!criteria.includeZeroFreq && w.formFrequency === 0) continue;
 
@@ -296,10 +631,52 @@ export function filterAndSortWords(
       if (w.familyFrequency === null || w.familyFrequency > criteria.maxFamilyFreq) continue;
     }
 
-    // 4. Status filter
+    // 4. COCA 2020 Rank, Frequency & PoS filters
+    if (criteria.cocaMultiPosOnly) {
+      if (!w.inCoca || (w.cocaPosCount || 0) < 2) continue;
+    }
+    if (posFilterSet) {
+      if (!w.inCoca || !w.cocaLexemes || !w.cocaLexemes.some((l) => posFilterSet.has(l.pos))) {
+        continue;
+      }
+    }
+    if (criteria.minCocaRank !== null && criteria.minCocaRank !== undefined) {
+      if (!w.inCoca) continue;
+      const effectiveRank =
+        cocaRankMode === 'lemma_pos'
+          ? posFilterSet && w.cocaLexemes
+            ? Math.min(
+                ...w.cocaLexemes.filter((l) => posFilterSet.has(l.pos)).map((l) => l.rank)
+              )
+            : (w.cocaBestPosRank ?? null)
+          : (w.cocaHeadwordDerivedRank ?? null);
+      if (effectiveRank === null || effectiveRank < criteria.minCocaRank) continue;
+    }
+    if (criteria.maxCocaRank !== null && criteria.maxCocaRank !== undefined) {
+      if (!w.inCoca) continue;
+      const effectiveRank =
+        cocaRankMode === 'lemma_pos'
+          ? posFilterSet && w.cocaLexemes
+            ? Math.min(
+                ...w.cocaLexemes.filter((l) => posFilterSet.has(l.pos)).map((l) => l.rank)
+              )
+            : (w.cocaBestPosRank ?? null)
+          : (w.cocaHeadwordDerivedRank ?? null);
+      if (effectiveRank === null || effectiveRank > criteria.maxCocaRank) continue;
+    }
+    if (criteria.minCocaFreq !== null && criteria.minCocaFreq !== undefined) {
+      if (!w.inCoca || (w.cocaHeadwordTotalFreq ?? -1) < criteria.minCocaFreq) continue;
+    }
+    if (criteria.maxCocaFreq !== null && criteria.maxCocaFreq !== undefined) {
+      if (!w.inCoca || (w.cocaHeadwordTotalFreq ?? Number.MAX_SAFE_INTEGER) > criteria.maxCocaFreq) {
+        continue;
+      }
+    }
+
+    // 5. Status filter
     if (statusSet && !statusSet.has(status)) continue;
 
-    // 5. Tags filter
+    // 6. Tags filter
     if (criteria.tagFilterMode === 'untagged') {
       if (rec && rec.tags && rec.tags.length > 0) continue;
     } else if (requiredTags.length > 0) {
@@ -312,7 +689,7 @@ export function filterAndSortWords(
       }
     }
 
-    // 6. Family structure filter
+    // 7. Family structure filter
     switch (criteria.familyFilter) {
       case 'headword_only':
         if (!w.isHeadword) continue;
@@ -351,27 +728,44 @@ export function filterAndSortWords(
         break;
     }
 
-    // 7. Special toggles
+    // 8. Special toggles
     if (criteria.phrasesOnly && !w.isPhrase) continue;
     if (criteria.homographsOnly && w.homographNumbers.length === 0) continue;
 
-    // 8. Search query matching
+    // 9. Search query matching
     if (cleanQ) {
-      const matchWord = w.normalized.includes(cleanQ);
-      const matchHead = w.headword ? w.headword.toLowerCase().includes(cleanQ) : false;
-      const matchRawCet = w.cetRefs.some((r) => r.rawLine.toLowerCase().includes(cleanQ));
-      const matchNotes = rec?.notes ? rec.notes.toLowerCase().includes(cleanQ) : false;
-      const matchTags = rec?.tags ? rec.tags.some((t) => t.toLowerCase().includes(cleanQ)) : false;
-      if (!matchWord && !matchHead && !matchRawCet && !matchNotes && !matchTags) {
-        continue;
+      if (matchMode === 'exact') {
+        const exactHit =
+          w.normalized === cleanQ ||
+          w.displayVariants.some((v) => v.toLowerCase() === cleanQ);
+        if (!exactHit) continue;
+      } else if (matchMode === 'prefix') {
+        const prefixHit =
+          w.normalized.startsWith(cleanQ) ||
+          w.displayVariants.some((v) => v.toLowerCase().startsWith(cleanQ));
+        if (!prefixHit) continue;
+      } else if (matchMode === 'fuzzy') {
+        const fuzzyHit =
+          w.normalized === cleanQ ||
+          w.normalized.startsWith(cleanQ) ||
+          isEditDistanceAtMostOne(w.normalized, cleanQ);
+        if (!fuzzyHit) continue;
+      } else {
+        const matchWord = w.normalized.includes(cleanQ);
+        const matchVariant = w.displayVariants.some((v) => v.toLowerCase().includes(cleanQ));
+        const matchHead = w.headword ? w.headword.toLowerCase().includes(cleanQ) : false;
+        const matchRawCet = w.cetRefs.some((r) => r.rawLine.toLowerCase().includes(cleanQ));
+        const matchNotes = rec?.notes ? rec.notes.toLowerCase().includes(cleanQ) : false;
+        const matchTags = rec?.tags ? rec.tags.some((t) => t.toLowerCase().includes(cleanQ)) : false;
+        if (!matchWord && !matchVariant && !matchHead && !matchRawCet && !matchNotes && !matchTags) {
+          continue;
+        }
       }
     }
 
     result.push(w);
   }
 
-  // Sort results
-  // If user typed a search query, always surface exact matches and headword matches first
   if (cleanQ) {
     result.sort((a, b) => {
       const aExact = a.normalized === cleanQ ? 0 : 1;
@@ -391,6 +785,165 @@ export function filterAndSortWords(
   return result;
 }
 
+/**
+ * Filters and sorts the 60,000 official COCA 2020 Lemma+PoS records (`CocaLexemeRecord[]`)
+ * using the unified `FilterCriteria` model.
+ */
+export function filterAndSortCocaLexemes(
+  lexemes: CocaLexemeRecord[],
+  userRecordsMap: Map<string, UserWordRecord>,
+  criteria: FilterCriteria,
+  sortField: SortField
+): CocaLexemeRecord[] {
+  const q = criteria.searchQuery.trim().toLowerCase();
+  const cleanQ = q.replace(/★/g, '').replace(/[¹²³⁴⁵]/g, '');
+  const matchMode = criteria.searchMatchMode || 'auto';
+  const bandsSet = criteria.bands.length > 0 ? new Set(criteria.bands) : null;
+  const statusSet = criteria.statuses.length > 0 ? new Set(criteria.statuses) : null;
+  const posFilterSet =
+    criteria.cocaPosFilter && criteria.cocaPosFilter.length > 0
+      ? new Set(criteria.cocaPosFilter)
+      : null;
+  const cocaRankMode = criteria.cocaRankMode || 'lemma_pos';
+
+  const result: CocaLexemeRecord[] = [];
+
+  for (let i = 0; i < lexemes.length; i++) {
+    const lex = lexemes[i];
+    const rec = userRecordsMap.get(lex.normalizedHeadword);
+    // Check explicit PoS-level status first; fall back to unrated if not set, or allow matching overall status
+    const posStatus: LearningStatus = rec?.posStatuses?.[lex.pos] || rec?.status || 'unrated';
+
+    switch (criteria.sourceFilter) {
+      case 'cet_all':
+      case 'both_cet_coca':
+        if (!lex.inCet) continue;
+        break;
+      case 'cet4':
+        if (!lex.isCet4) continue;
+        break;
+      case 'cet6':
+        if (!lex.isCet6) continue;
+        break;
+      case 'cet6_new':
+        if (!lex.isCet6Only) continue;
+        break;
+      case 'bnc_all':
+      case 'both_bnc_coca':
+        if (!lex.inBnc) continue;
+        break;
+      case 'all_three_sources':
+        if (!lex.inCet || !lex.inBnc) continue;
+        break;
+      case 'coca_only':
+        if (lex.inCet || lex.inBnc) continue;
+        break;
+      case 'cet_only':
+      case 'bnc_only':
+      case 'cet_not_in_coca':
+        continue;
+    }
+
+    if (bandsSet) {
+      if (lex.bncBandNumber === null || !bandsSet.has(lex.bncBandNumber)) continue;
+    }
+    if (criteria.minBand !== null) {
+      if (lex.bncBandNumber === null || lex.bncBandNumber < criteria.minBand) continue;
+    }
+    if (criteria.maxBand !== null) {
+      if (lex.bncBandNumber === null || lex.bncBandNumber > criteria.maxBand) continue;
+    }
+
+    if (criteria.cocaMultiPosOnly && lex.headwordPosCount < 2) continue;
+    if (posFilterSet && !posFilterSet.has(lex.pos)) continue;
+
+    const targetRank = cocaRankMode === 'derived_headword' ? lex.headwordDerivedRank : lex.rank;
+    if (
+      criteria.minCocaRank !== null &&
+      criteria.minCocaRank !== undefined &&
+      targetRank < criteria.minCocaRank
+    ) {
+      continue;
+    }
+    if (
+      criteria.maxCocaRank !== null &&
+      criteria.maxCocaRank !== undefined &&
+      targetRank > criteria.maxCocaRank
+    ) {
+      continue;
+    }
+    if (
+      criteria.minCocaFreq !== null &&
+      criteria.minCocaFreq !== undefined &&
+      lex.frequency < criteria.minCocaFreq
+    ) {
+      continue;
+    }
+    if (
+      criteria.maxCocaFreq !== null &&
+      criteria.maxCocaFreq !== undefined &&
+      lex.frequency > criteria.maxCocaFreq
+    ) {
+      continue;
+    }
+
+    if (statusSet && !statusSet.has(posStatus)) continue;
+
+    if (cleanQ) {
+      if (matchMode === 'exact') {
+        if (lex.normalizedHeadword !== cleanQ) continue;
+      } else if (matchMode === 'prefix') {
+        if (!lex.normalizedHeadword.startsWith(cleanQ)) continue;
+      } else if (matchMode === 'fuzzy') {
+        if (
+          lex.normalizedHeadword !== cleanQ &&
+          !lex.normalizedHeadword.startsWith(cleanQ) &&
+          !isEditDistanceAtMostOne(lex.normalizedHeadword, cleanQ)
+        ) {
+          continue;
+        }
+      } else {
+        const hitHw = lex.normalizedHeadword.includes(cleanQ);
+        const hitPos = lex.pos.toLowerCase().includes(cleanQ) || lex.posZh.includes(cleanQ);
+        if (!hitHw && !hitPos) continue;
+      }
+    }
+
+    result.push(lex);
+  }
+
+  result.sort((a, b) => {
+    if (cleanQ) {
+      const aEx = a.normalizedHeadword === cleanQ ? 0 : 1;
+      const bEx = b.normalizedHeadword === cleanQ ? 0 : 1;
+      if (aEx !== bEx) return aEx - bEx;
+    }
+    switch (sortField) {
+      case 'coca_rank_desc':
+      case 'coca_freq_asc':
+        return b.rank - a.rank;
+      case 'word_asc':
+        return (
+          a.normalizedHeadword.localeCompare(b.normalizedHeadword) || a.rank - b.rank
+        );
+      case 'word_desc':
+        return (
+          b.normalizedHeadword.localeCompare(a.normalizedHeadword) || a.rank - b.rank
+        );
+      case 'coca_pos_count_desc':
+        return b.headwordPosCount - a.headwordPosCount || a.rank - b.rank;
+      case 'band_asc':
+        return (a.bncBandNumber ?? 999) - (b.bncBandNumber ?? 999) || a.rank - b.rank;
+      case 'coca_rank_asc':
+      case 'coca_freq_desc':
+      default:
+        return a.rank - b.rank;
+    }
+  });
+
+  return result;
+}
+
 function compareWords(
   a: LexiconWordItem,
   b: LexiconWordItem,
@@ -402,6 +955,45 @@ function compareWords(
       return a.normalized.localeCompare(b.normalized);
     case 'word_desc':
       return b.normalized.localeCompare(a.normalized);
+    case 'coca_rank_asc': {
+      const ra = a.cocaHeadwordDerivedRank ?? a.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      const rb = b.cocaHeadwordDerivedRank ?? b.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      if (ra !== rb) return ra - rb;
+      const bpa = a.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      const bpb = b.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      if (bpa !== bpb) return bpa - bpb;
+      return a.normalized.localeCompare(b.normalized);
+    }
+    case 'coca_rank_desc': {
+      const ra = a.cocaHeadwordDerivedRank ?? a.cocaBestPosRank ?? -1;
+      const rb = b.cocaHeadwordDerivedRank ?? b.cocaBestPosRank ?? -1;
+      if (rb !== ra) return rb - ra;
+      return a.normalized.localeCompare(b.normalized);
+    }
+    case 'coca_freq_desc': {
+      const fa = a.cocaHeadwordTotalFreq ?? -1;
+      const fb = b.cocaHeadwordTotalFreq ?? -1;
+      if (fb !== fa) return fb - fa;
+      const bpa = a.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      const bpb = b.cocaBestPosRank ?? Number.MAX_SAFE_INTEGER;
+      if (bpa !== bpb) return bpa - bpb;
+      return a.normalized.localeCompare(b.normalized);
+    }
+    case 'coca_freq_asc': {
+      const fa = a.cocaHeadwordTotalFreq ?? Number.MAX_SAFE_INTEGER;
+      const fb = b.cocaHeadwordTotalFreq ?? Number.MAX_SAFE_INTEGER;
+      if (fa !== fb) return fa - fb;
+      return a.normalized.localeCompare(b.normalized);
+    }
+    case 'coca_pos_count_desc': {
+      const pca = a.cocaPosCount ?? 0;
+      const pcb = b.cocaPosCount ?? 0;
+      if (pcb !== pca) return pcb - pca;
+      const fa = a.cocaHeadwordTotalFreq ?? -1;
+      const fb = b.cocaHeadwordTotalFreq ?? -1;
+      if (fb !== fa) return fb - fa;
+      return a.normalized.localeCompare(b.normalized);
+    }
     case 'form_freq_desc': {
       const fa = a.formFrequency ?? -1;
       const fb = b.formFrequency ?? -1;
@@ -472,38 +1064,6 @@ function compareWords(
   }
 }
 
-/**
- * Levenshtein distance <= 1 check for optional fuzzy search in GlobalSearchModal.
- */
-function isEditDistanceAtMostOne(a: string, b: string): boolean {
-  if (a === b) return true;
-  const la = a.length;
-  const lb = b.length;
-  if (Math.abs(la - lb) > 1) return false;
-
-  let i = 0;
-  let j = 0;
-  let edits = 0;
-
-  while (i < la && j < lb) {
-    if (a[i] === b[j]) {
-      i++;
-      j++;
-    } else {
-      edits++;
-      if (edits > 1) return false;
-      if (la > lb) i++;
-      else if (lb > la) j++;
-      else {
-        i++;
-        j++;
-      }
-    }
-  }
-  if (i < la || j < lb) edits++;
-  return edits <= 1;
-}
-
 export interface SearchLexiconResult {
   word: LexiconWordItem;
   matchRank: 'exact' | 'headword' | 'prefix' | 'cet_raw' | 'substring' | 'fuzzy';
@@ -511,7 +1071,7 @@ export interface SearchLexiconResult {
 }
 
 /**
- * Fast ranked search across words, inflections, headwords, and raw CET shorthand.
+ * Fast ranked search across words, inflections, headwords, COCA lemmas, and raw CET shorthand.
  */
 export function searchLexicon(
   words: LexiconWordItem[],
@@ -539,14 +1099,15 @@ export function searchLexicon(
     const w = words[i];
 
     if (w.normalized === q) {
+      const cocaPart = w.inCoca ? ` · COCA #${w.cocaHeadwordDerivedRank}` : '';
       exactMatches.push({
         word: w,
         matchRank: 'exact',
         matchedContext: w.isHeadword
-          ? `词族首词 (${w.band || 'CET'})`
+          ? `词头 (${w.band || (w.inCoca ? 'COCA' : 'CET')})${cocaPart}`
           : w.headword
-            ? `派生自词族 ${w.headword} (${w.band})`
-            : '大纲词条',
+            ? `派生自词族 ${w.headword} (${w.band})${cocaPart}`
+            : `大纲词条${cocaPart}`,
       });
       continue;
     }
@@ -564,7 +1125,11 @@ export function searchLexicon(
       prefixMatches.push({
         word: w,
         matchRank: 'prefix',
-        matchedContext: w.headword ? `词族 ${w.headword}` : '前缀匹配',
+        matchedContext: w.headword
+          ? `词族 ${w.headword}`
+          : w.inCoca
+            ? `COCA #${w.cocaHeadwordDerivedRank}`
+            : '前缀匹配',
       });
       continue;
     }
@@ -597,8 +1162,8 @@ export function searchLexicon(
   }
 
   const sortByFreq = (a: SearchLexiconResult, b: SearchLexiconResult) =>
-    (b.word.formFrequency ?? b.word.familyFrequency ?? 0) -
-    (a.word.formFrequency ?? a.word.familyFrequency ?? 0);
+    (b.word.cocaHeadwordTotalFreq ?? b.word.formFrequency ?? b.word.familyFrequency ?? 0) -
+    (a.word.cocaHeadwordTotalFreq ?? a.word.formFrequency ?? a.word.familyFrequency ?? 0);
 
   headwordMatches.sort(sortByFreq);
   prefixMatches.sort(sortByFreq);
@@ -618,7 +1183,6 @@ export function searchLexicon(
 
 /**
  * Splits a multi-line CSV/TSV text into logical records following RFC 4180 quote rules.
- * Newlines inside double-quoted fields are preserved as part of the field rather than splitting the row.
  */
 export function splitCsvRecords(rawText: string): string[] {
   const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -669,15 +1233,9 @@ export function splitCsvRecords(rawText: string): string[] {
 }
 
 /**
- * Parse a single CSV or TSV record (which may contain embedded newlines inside quotes)
- * following RFC 4180 quote and escaped-quote rules.
- * Supports:
- * - Tab-delimited records (TSV)
- * - Comma-delimited records with double-quoted fields, commas/newlines inside quotes,
- *   and escaped double-quotes ("" -> ").
+ * Parse a single CSV or TSV record following RFC 4180 quote rules.
  */
 export function parseCsvLine(line: string, delimiter?: ',' | '\t'): string[] {
-  // Auto-detect delimiter outside quotes if not explicitly passed
   let effectiveDelimiter: ',' | '\t' = delimiter || ',';
   if (!delimiter) {
     let q = false;
@@ -756,6 +1314,7 @@ const STATUS_TOKEN_MAP: Record<string, LearningStatus> = {
   queued: 'queued',
   todo: 'queued',
   待学: 'queued',
+  待学习: 'queued',
   生词: 'queued',
   learning: 'learning',
   studying: 'learning',
@@ -787,8 +1346,7 @@ export interface BatchParsedRow {
 }
 
 /**
- * Parses multi-line batch input text (single-column, TSV, or RFC 4180 CSV including multiline quoted fields)
- * and resolves each row against the lexicon.
+ * Parses multi-line batch input text and resolves each row against the lexicon.
  */
 export function parseBatchInputText(
   rawText: string,
@@ -803,7 +1361,6 @@ export function parseBatchInputText(
     const rawLine = records[i].trim();
     if (!rawLine || rawLine.startsWith('#')) continue;
 
-    // Detect delimiter outside quotes: prefer Tab if present outside quotes, otherwise Comma if present outside quotes
     let hasTabOutsideQuotes = false;
     let hasCommaOutsideQuotes = false;
     let q = false;
@@ -828,7 +1385,6 @@ export function parseBatchInputText(
     const firstCol = (cols[0] || '').replace(/^["']|["']$/g, '').trim();
     if (!firstCol) continue;
 
-    // Skip optional CSV/TSV header row
     if (
       i === 0 &&
       ['word', '单词', '词条', 'headword'].includes(firstCol.toLowerCase()) &&
@@ -847,8 +1403,6 @@ export function parseBatchInputText(
     let parsedTags: string[] = [];
     let parsedNote: string | undefined;
 
-    // 1. Check if this is the 9-column exported CSV format:
-    // Word,CET_Levels,BNC_Band,Headword,Form_Frequency,Family_Frequency,Learning_Status,Tags,Notes
     const col6Status =
       cols.length >= 7
         ? STATUS_TOKEN_MAP[(cols[6] || '').trim().toLowerCase()] ||
@@ -863,7 +1417,6 @@ export function parseBatchInputText(
         .filter(Boolean);
       parsedNote = cols[8]?.trim() || undefined;
     } else {
-      // 2. Standard 2-to-4 column batch format: Word, Status/Tags, Tags, Notes
       if (cols[1]) {
         const sCandidate =
           STATUS_TOKEN_MAP[cols[1].trim().toLowerCase()] || STATUS_TOKEN_MAP[cols[1].trim()];
@@ -908,7 +1461,6 @@ export function parseBatchInputText(
         matchStatus = 'matched_exact';
       }
     } else {
-      // Try variant or inflection fallback
       const stemCandidates = [
         norm.replace(/ies$/, 'y'),
         norm.replace(/es$/, ''),
@@ -960,8 +1512,6 @@ export function parseBatchInputText(
 
 /**
  * Selects CET-4/CET-6 word IDs inside a BNC/COCA family for the "大纲词标为待学" action.
- * By default (`overwriteExisting = false`), ONLY selects members whose status is currently `'unrated'`,
- * protecting already mastered, learning, or deferred words from being overwritten.
  */
 export function selectFamilyCetWordIdsForQueue(
   family: BncCocaFamily,
@@ -980,26 +1530,209 @@ export function selectFamilyCetWordIdsForQueue(
     .map((m) => m.normalized);
 }
 
+/**
+ * Corpus Comparison Workbench — Preset Set Definitions & Set Comparison Engine
+ */
+export type CorpusComparisonPresetId =
+  | 'coca_top1k'
+  | 'coca_top3k'
+  | 'coca_top5k'
+  | 'coca_top10k'
+  | 'coca_20k_40k'
+  | 'bnc_1k_3k'
+  | 'bnc_1k_5k'
+  | 'bnc_5k_10k'
+  | 'bnc_10k_20k'
+  | 'cet4_all'
+  | 'cet6_all'
+  | 'cet6_new';
+
+export const CORPUS_COMPARISON_PRESETS: {
+  id: CorpusComparisonPresetId;
+  label: string;
+  unitDescription: string;
+}[] = [
+  { id: 'coca_top1k', label: 'COCA Top 1,000 词头', unitDescription: '按词头合计频次派生排名前 1,000 个去重词头' },
+  { id: 'coca_top3k', label: 'COCA Top 3,000 词头', unitDescription: '按词头合计频次派生排名前 3,000 个去重词头' },
+  { id: 'coca_top5k', label: 'COCA Top 5,000 词头', unitDescription: '按词头合计频次派生排名前 5,000 个去重词头' },
+  { id: 'coca_top10k', label: 'COCA Top 10,000 词头', unitDescription: '按词头合计频次派生排名前 10,000 个去重词头' },
+  { id: 'coca_20k_40k', label: 'COCA 20k–40k 中低频词头', unitDescription: 'COCA 词头综合排名 20,001–40,000 区间词头' },
+  { id: 'bnc_1k_3k', label: 'BNC 1k–3k 词族代表词头', unitDescription: 'Nation BNC/COCA 1k–3k 频段词族代表词头' },
+  { id: 'bnc_1k_5k', label: 'BNC 1k–5k 词族代表词头', unitDescription: 'Nation BNC/COCA 1k–5k 频段词族代表词头' },
+  { id: 'bnc_5k_10k', label: 'BNC 5k–10k 词族代表词头', unitDescription: 'Nation BNC/COCA 5k–10k 频段词族代表词头' },
+  { id: 'bnc_10k_20k', label: 'BNC 10k–20k 词族代表词头', unitDescription: 'Nation BNC/COCA 10k–20k 频段词族代表词头' },
+  { id: 'cet4_all', label: 'CET-4 四级大纲词条', unitDescription: 'CET2016 四级大纲收录的全部去重词形' },
+  { id: 'cet6_all', label: 'CET-6 六级大纲词条', unitDescription: 'CET2016 六级大纲收录的全部去重词形' },
+  { id: 'cet6_new', label: 'CET-6 六级新增词条 (★)', unitDescription: '仅属于 CET-6 新增（不含四级）的去重词形' },
+];
+
+export function resolvePresetWordSet(
+  presetId: CorpusComparisonPresetId,
+  words: LexiconWordItem[],
+  bncMode: 'headwords_only' | 'all_family_forms' = 'headwords_only'
+): LexiconWordItem[] {
+  return words.filter((w) => {
+    switch (presetId) {
+      case 'coca_top1k':
+        return Boolean(w.inCoca && (w.cocaHeadwordDerivedRank ?? 999999) <= 1000);
+      case 'coca_top3k':
+        return Boolean(w.inCoca && (w.cocaHeadwordDerivedRank ?? 999999) <= 3000);
+      case 'coca_top5k':
+        return Boolean(w.inCoca && (w.cocaHeadwordDerivedRank ?? 999999) <= 5000);
+      case 'coca_top10k':
+        return Boolean(w.inCoca && (w.cocaHeadwordDerivedRank ?? 999999) <= 10000);
+      case 'coca_20k_40k':
+        return Boolean(
+          w.inCoca &&
+            (w.cocaHeadwordDerivedRank ?? 0) > 20000 &&
+            (w.cocaHeadwordDerivedRank ?? 999999) <= 40000
+        );
+      case 'bnc_1k_3k':
+        return (
+          w.inBnc &&
+          (bncMode === 'all_family_forms' || w.isHeadword) &&
+          w.bandNumber !== null &&
+          w.bandNumber >= 1 &&
+          w.bandNumber <= 3
+        );
+      case 'bnc_1k_5k':
+        return (
+          w.inBnc &&
+          (bncMode === 'all_family_forms' || w.isHeadword) &&
+          w.bandNumber !== null &&
+          w.bandNumber >= 1 &&
+          w.bandNumber <= 5
+        );
+      case 'bnc_5k_10k':
+        return (
+          w.inBnc &&
+          (bncMode === 'all_family_forms' || w.isHeadword) &&
+          w.bandNumber !== null &&
+          w.bandNumber >= 5 &&
+          w.bandNumber <= 10
+        );
+      case 'bnc_10k_20k':
+        return (
+          w.inBnc &&
+          (bncMode === 'all_family_forms' || w.isHeadword) &&
+          w.bandNumber !== null &&
+          w.bandNumber >= 10 &&
+          w.bandNumber <= 20
+        );
+      case 'cet4_all':
+        return w.isCet4;
+      case 'cet6_all':
+        return w.isCet6;
+      case 'cet6_new':
+        return w.isCet6Only;
+    }
+  });
+}
+
+export interface CorpusSetComparisonResult {
+  setACount: number;
+  setBCount: number;
+  intersectionWords: LexiconWordItem[];
+  onlyInAWords: LexiconWordItem[];
+  onlyInBWords: LexiconWordItem[];
+  unionCount: number;
+  jaccardSimilarityPct: number;
+  overlapCoeffPct: number;
+  intersectionPosCounts: Record<string, number>;
+  intersectionBandCounts: Record<string, number>;
+}
+
+export function compareCorpusWordSets(
+  setA: LexiconWordItem[],
+  setB: LexiconWordItem[]
+): CorpusSetComparisonResult {
+  const mapA = new Map(setA.map((w) => [w.id, w]));
+  const mapB = new Map(setB.map((w) => [w.id, w]));
+
+  const intersectionWords: LexiconWordItem[] = [];
+  const onlyInAWords: LexiconWordItem[] = [];
+  const onlyInBWords: LexiconWordItem[] = [];
+  const intersectionPosCounts: Record<string, number> = {};
+  const intersectionBandCounts: Record<string, number> = {};
+
+  for (const [id, w] of mapA.entries()) {
+    if (mapB.has(id)) {
+      intersectionWords.push(w);
+      const pos = w.cocaPrimaryPos ? getCocaPosMeta(w.cocaPrimaryPos).shortZh : '无COCA词性';
+      intersectionPosCounts[pos] = (intersectionPosCounts[pos] || 0) + 1;
+      const bandKey = w.bandNumber
+        ? w.bandNumber <= 5
+          ? `BNC ${w.band}`
+          : w.bandNumber <= 10
+            ? 'BNC 6k–10k'
+            : 'BNC 11k–25k'
+        : '无BNC频段';
+      intersectionBandCounts[bandKey] = (intersectionBandCounts[bandKey] || 0) + 1;
+    } else {
+      onlyInAWords.push(w);
+    }
+  }
+
+  for (const [id, w] of mapB.entries()) {
+    if (!mapA.has(id)) {
+      onlyInBWords.push(w);
+    }
+  }
+
+  const unionCount = intersectionWords.length + onlyInAWords.length + onlyInBWords.length;
+  const minCount = Math.min(setA.length, setB.length);
+  const jaccardSimilarityPct =
+    unionCount > 0 ? Number(((intersectionWords.length / unionCount) * 100).toFixed(2)) : 0;
+  const overlapCoeffPct =
+    minCount > 0 ? Number(((intersectionWords.length / minCount) * 100).toFixed(2)) : 0;
+
+  return {
+    setACount: setA.length,
+    setBCount: setB.length,
+    intersectionWords,
+    onlyInAWords,
+    onlyInBWords,
+    unionCount,
+    jaccardSimilarityPct,
+    overlapCoeffPct,
+    intersectionPosCounts,
+    intersectionBandCounts,
+  };
+}
+
 export interface BandCoverageRow {
   bandNum: number;
   bandLabel: string;
   familyCount: number;
-  coveredFamilies: number;
+  coveredFamilies: number; // touched or partial or full (at least 1 mastered member for backward compatibility)
+  touchedFamilies: number; // >= 1 member queued/learning/mastered
+  partialMasteredFamilies: number; // >= 1 mastered AND < all members mastered
+  fullMasteredFamilies: number; // all members in family mastered
   wordCount: number;
   masteredWords: number;
   learningOrQueuedWords: number;
   cetWordsInBand: number;
+  cocaWordsInBand: number;
   pctMastered: number;
 }
 
-/**
- * Pure statistical summary for AnalyticsView and unit tests.
- * Explicitly separates:
- * 1. CET-4 / CET-6 expanded word-form mastery (展开词形掌握率)
- * 2. Official CET2016 raw entry partial coverage (官方词目覆盖率: 词目下任一词形已掌握)
- * 3. Official CET2016 raw entry full mastery (官方词目完整掌握率: 词目下所有成员槽位均已掌握)
- * 4. Strict BNC/COCA corpus token frequency coverage (仅统计 BNC/COCA 独立实测词形频次，绝不累加变体借用频次)
- */
+export interface CocaRankTierCoverageRow {
+  tierId: string;
+  tierLabel: string;
+  maxRank: number;
+  minRank: number;
+  totalCount: number;
+  unratedCount: number;
+  queuedCount: number;
+  learningCount: number;
+  masteredCount: number;
+  deferredCount: number;
+  evaluatedCount: number;
+  totalFreqWeight: number;
+  masteredFreqWeight: number;
+  freqCoveragePct: number;
+}
+
 export interface LexiconAnalyticsSummary {
   statusCounts: Record<LearningStatus, number>;
   cet4FormsTotal: number;
@@ -1020,13 +1753,45 @@ export interface LexiconAnalyticsSummary {
   masteredCorpusFreq: number;
   corpusWeightedPct: string;
   bandRows: BandCoverageRow[];
+
+  // Lexical Workbench 2.0 Multi-Layer & COCA Analytics
+  cocaHeadwordsTotal: number;
+  cocaHeadwordsMastered: number;
+  cocaHeadwordsLearningOrQueued: number;
+  cocaLexemesTotal: number;
+  cocaLexemesExplicitMastered: number;
+  cocaLexemesExplicitLearningOrQueued: number;
+  cocaLexemesProxyMastered: number;
+  cocaTotalTokenFreq: number;
+  cocaExplicitMasteredFreq: number;
+  cocaExplicitWeightedPct: string;
+  cocaProxyMasteredFreq: number;
+  cocaProxyWeightedPct: string;
+  cocaHeadwordTierRows: CocaRankTierCoverageRow[];
+  cocaLexemeTierRows: CocaRankTierCoverageRow[];
+  bncFamiliesTotal: number;
+  bncFamiliesUntouched: number;
+  bncFamiliesTouched: number;
+  bncFamiliesPartialMastered: number;
+  bncFamiliesFullMastered: number;
 }
+
+const COCA_TIER_BOUNDS: { id: string; label: string; min: number; max: number }[] = [
+  { id: '1k', label: 'Top 1,000', min: 1, max: 1000 },
+  { id: '3k', label: '1,001–3,000 (Top 3k)', min: 1001, max: 3000 },
+  { id: '5k', label: '3,001–5,000 (Top 5k)', min: 3001, max: 5000 },
+  { id: '10k', label: '5,001–10,000 (Top 10k)', min: 5001, max: 10000 },
+  { id: '20k', label: '10,001–20,000 (Top 20k)', min: 10001, max: 20000 },
+  { id: '30k', label: '20,001–30,000 (Top 30k)', min: 20001, max: 30000 },
+  { id: '60k', label: '30,001–60,000 (30k–60k)', min: 30001, max: 60000 },
+];
 
 export function computeLexiconAnalytics(
   words: LexiconWordItem[],
   families: BncCocaFamily[],
   cetEntries: CetOfficialEntry[],
-  userRecordsMap: Map<string, UserWordRecord>
+  userRecordsMap: Map<string, UserWordRecord>,
+  cocaLexemes?: CocaLexemeRecord[]
 ): LexiconAnalyticsSummary {
   const statusCounts: Record<LearningStatus, number> = {
     unrated: 0,
@@ -1050,12 +1815,34 @@ export function computeLexiconAnalytics(
   let totalCorpusFreq = 0;
   let masteredCorpusFreq = 0;
 
+  let cocaHeadwordsTotal = 0;
+  let cocaHeadwordsMastered = 0;
+  let cocaHeadwordsLearningOrQueued = 0;
+  let cocaTotalTokenFreq = 0;
+  let cocaProxyMasteredFreq = 0;
+
+  const cocaHeadwordTierRows: CocaRankTierCoverageRow[] = COCA_TIER_BOUNDS.map((b) => ({
+    tierId: b.id,
+    tierLabel: b.label,
+    minRank: b.min,
+    maxRank: b.max,
+    totalCount: 0,
+    unratedCount: 0,
+    queuedCount: 0,
+    learningCount: 0,
+    masteredCount: 0,
+    deferredCount: 0,
+    evaluatedCount: 0,
+    totalFreqWeight: 0,
+    masteredFreqWeight: 0,
+    freqCoveragePct: 0,
+  }));
+
   for (const w of words) {
     const rec = userRecordsMap.get(w.id);
     const st: LearningStatus = rec?.status || 'unrated';
     statusCounts[st]++;
 
-    // Only sum genuine BNC/COCA recorded word frequencies (never variant-linked null frequencies)
     if (w.inBnc && w.hasExactBncForm !== false && w.formFrequency !== null && w.formFrequency > 0) {
       totalCorpusFreq += w.formFrequency;
       if (st === 'mastered') {
@@ -1077,6 +1864,117 @@ export function computeLexiconAnalytics(
       if (st === 'mastered') cet6OnlyFormsMastered++;
       else if (st === 'learning' || st === 'queued') cet6OnlyFormsLearningOrQueued++;
     }
+
+    if (w.inCoca && w.cocaHeadwordDerivedRank !== null && w.cocaHeadwordDerivedRank !== undefined) {
+      cocaHeadwordsTotal++;
+      const hwFreq = w.cocaHeadwordTotalFreq || 0;
+      cocaTotalTokenFreq += hwFreq;
+      if (st === 'mastered') {
+        cocaHeadwordsMastered++;
+        cocaProxyMasteredFreq += hwFreq;
+      } else if (st === 'learning' || st === 'queued') {
+        cocaHeadwordsLearningOrQueued++;
+      }
+
+      const r = w.cocaHeadwordDerivedRank;
+      const tier = cocaHeadwordTierRows.find((t) => r >= t.minRank && r <= t.maxRank);
+      if (tier) {
+        tier.totalCount++;
+        tier.totalFreqWeight += hwFreq;
+        if (st === 'unrated') tier.unratedCount++;
+        else {
+          tier.evaluatedCount++;
+          if (st === 'queued') tier.queuedCount++;
+          else if (st === 'learning') tier.learningCount++;
+          else if (st === 'mastered') {
+            tier.masteredCount++;
+            tier.masteredFreqWeight += hwFreq;
+          } else if (st === 'deferred') tier.deferredCount++;
+        }
+      }
+    }
+  }
+
+  for (const tier of cocaHeadwordTierRows) {
+    tier.freqCoveragePct =
+      tier.totalFreqWeight > 0
+        ? Number(((tier.masteredFreqWeight / tier.totalFreqWeight) * 100).toFixed(1))
+        : 0;
+  }
+
+  // Compute COCA Lexeme (60,000 lemma+PoS records) mastery
+  let cocaLexemesTotal = 0;
+  let cocaLexemesExplicitMastered = 0;
+  let cocaLexemesExplicitLearningOrQueued = 0;
+  let cocaLexemesProxyMastered = 0;
+  let cocaExplicitMasteredFreq = 0;
+
+  const cocaLexemeTierRows: CocaRankTierCoverageRow[] = COCA_TIER_BOUNDS.map((b) => ({
+    tierId: b.id,
+    tierLabel: b.label,
+    minRank: b.min,
+    maxRank: b.max,
+    totalCount: 0,
+    unratedCount: 0,
+    queuedCount: 0,
+    learningCount: 0,
+    masteredCount: 0,
+    deferredCount: 0,
+    evaluatedCount: 0,
+    totalFreqWeight: 0,
+    masteredFreqWeight: 0,
+    freqCoveragePct: 0,
+  }));
+
+  if (cocaLexemes && cocaLexemes.length > 0) {
+    cocaLexemesTotal = cocaLexemes.length;
+    for (const lex of cocaLexemes) {
+      const rec = userRecordsMap.get(lex.normalizedHeadword);
+      const explicitPosSt: LearningStatus = rec?.posStatuses?.[lex.pos] || 'unrated';
+      // For single-PoS headwords, if the user marked the headword mastered, or explicitly marked the PoS mastered
+      const effectiveExplicitSt: LearningStatus =
+        explicitPosSt !== 'unrated'
+          ? explicitPosSt
+          : lex.headwordPosCount === 1 && rec?.status
+            ? rec.status
+            : 'unrated';
+      const proxySt: LearningStatus =
+        explicitPosSt !== 'unrated' ? explicitPosSt : rec?.status || 'unrated';
+
+      if (effectiveExplicitSt === 'mastered') {
+        cocaLexemesExplicitMastered++;
+        cocaExplicitMasteredFreq += lex.frequency;
+      } else if (effectiveExplicitSt === 'learning' || effectiveExplicitSt === 'queued') {
+        cocaLexemesExplicitLearningOrQueued++;
+      }
+
+      if (proxySt === 'mastered') {
+        cocaLexemesProxyMastered++;
+      }
+
+      const tier = cocaLexemeTierRows.find((t) => lex.rank >= t.minRank && lex.rank <= t.maxRank);
+      if (tier) {
+        tier.totalCount++;
+        tier.totalFreqWeight += lex.frequency;
+        if (proxySt === 'unrated') tier.unratedCount++;
+        else {
+          tier.evaluatedCount++;
+          if (proxySt === 'queued') tier.queuedCount++;
+          else if (proxySt === 'learning') tier.learningCount++;
+          else if (proxySt === 'mastered') {
+            tier.masteredCount++;
+            tier.masteredFreqWeight += lex.frequency;
+          } else if (proxySt === 'deferred') tier.deferredCount++;
+        }
+      }
+    }
+  }
+
+  for (const tier of cocaLexemeTierRows) {
+    tier.freqCoveragePct =
+      tier.totalFreqWeight > 0
+        ? Number(((tier.masteredFreqWeight / tier.totalFreqWeight) * 100).toFixed(1))
+        : 0;
   }
 
   let cet4OfficialTotal = 0;
@@ -1109,6 +2007,11 @@ export function computeLexiconAnalytics(
     }
   }
 
+  let bncFamiliesUntouched = 0;
+  let bncFamiliesTouched = 0;
+  let bncFamiliesPartialMastered = 0;
+  let bncFamiliesFullMastered = 0;
+
   const bandRows: BandCoverageRow[] = Array.from({ length: 25 }, (_, idx) => {
     const bandNum = idx + 1;
     const bandFams = families.filter((f) => f.bandNumber === bandNum);
@@ -1116,15 +2019,25 @@ export function computeLexiconAnalytics(
     let masteredWords = 0;
     let learningOrQueuedWords = 0;
     let coveredFamilies = 0;
+    let touchedFamilies = 0;
+    let partialMasteredFamilies = 0;
+    let fullMasteredFamilies = 0;
     let cetWordsInBand = 0;
+    let cocaWordsInBand = 0;
 
     for (const fam of bandFams) {
-      let famHasMastered = false;
+      let famMasteredMembers = 0;
+      let famActiveMembers = 0;
       cetWordsInBand += fam.cetMemberCount;
+      cocaWordsInBand += fam.cocaMatchedMemberCount || 0;
+
       for (const m of fam.members) {
         const st = userRecordsMap.get(m.normalized)?.status || 'unrated';
         if (st === 'mastered') {
-          famHasMastered = true;
+          famMasteredMembers++;
+          famActiveMembers++;
+        } else if (st === 'learning' || st === 'queued') {
+          famActiveMembers++;
         }
         if (!seenWordsInBand.has(m.normalized)) {
           seenWordsInBand.add(m.normalized);
@@ -1135,7 +2048,23 @@ export function computeLexiconAnalytics(
           }
         }
       }
-      if (famHasMastered) coveredFamilies++;
+
+      if (famActiveMembers === 0) {
+        bncFamiliesUntouched++;
+      } else {
+        touchedFamilies++;
+        bncFamiliesTouched++;
+      }
+      if (famMasteredMembers > 0) {
+        coveredFamilies++;
+        if (famMasteredMembers === fam.members.length) {
+          fullMasteredFamilies++;
+          bncFamiliesFullMastered++;
+        } else {
+          partialMasteredFamilies++;
+          bncFamiliesPartialMastered++;
+        }
+      }
     }
 
     const wordCount = seenWordsInBand.size;
@@ -1144,10 +2073,14 @@ export function computeLexiconAnalytics(
       bandLabel: `${bandNum}k`,
       familyCount: bandFams.length,
       coveredFamilies,
+      touchedFamilies,
+      partialMasteredFamilies,
+      fullMasteredFamilies,
       wordCount,
       masteredWords,
       learningOrQueuedWords,
       cetWordsInBand,
+      cocaWordsInBand,
       pctMastered: wordCount > 0 ? Math.round((masteredWords / wordCount) * 100) : 0,
     };
   });
@@ -1173,5 +2106,30 @@ export function computeLexiconAnalytics(
     corpusWeightedPct:
       totalCorpusFreq > 0 ? ((masteredCorpusFreq / totalCorpusFreq) * 100).toFixed(1) : '0.0',
     bandRows,
+    cocaHeadwordsTotal,
+    cocaHeadwordsMastered,
+    cocaHeadwordsLearningOrQueued,
+    cocaLexemesTotal,
+    cocaLexemesExplicitMastered,
+    cocaLexemesExplicitLearningOrQueued,
+    cocaLexemesProxyMastered,
+    cocaTotalTokenFreq,
+    cocaExplicitMasteredFreq,
+    cocaExplicitWeightedPct:
+      cocaTotalTokenFreq > 0
+        ? ((cocaExplicitMasteredFreq / cocaTotalTokenFreq) * 100).toFixed(2)
+        : '0.00',
+    cocaProxyMasteredFreq,
+    cocaProxyWeightedPct:
+      cocaTotalTokenFreq > 0
+        ? ((cocaProxyMasteredFreq / cocaTotalTokenFreq) * 100).toFixed(2)
+        : '0.00',
+    cocaHeadwordTierRows,
+    cocaLexemeTierRows,
+    bncFamiliesTotal: families.length,
+    bncFamiliesUntouched,
+    bncFamiliesTouched,
+    bncFamiliesPartialMastered,
+    bncFamiliesFullMastered,
   };
 }

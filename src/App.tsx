@@ -1,625 +1,499 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-  BookOpen,
-  Layers,
-  Bookmark,
-  FileSpreadsheet,
-  BarChart3,
-  Settings,
   Search,
+  Compass,
+  Layers,
+  BookmarkCheck,
+  BarChart3,
+  Database,
   Sun,
   Moon,
-  PanelRightClose,
-  PanelRightOpen,
-  CheckCircle2,
-  AlertTriangle,
-  X,
+  FlaskConical,
 } from 'lucide-react';
 import {
   ActivityLogEntry,
-  BncCocaFamily,
+  CocaRawPos,
   DictionaryTemplate,
   FilterCriteria,
-  LEARNING_STATUS_META,
   LearningStatus,
   LexiconDatabaseBundle,
   LexiconWordItem,
-  SortField,
+  NavigationTab,
+  SortOption,
   UserWordRecord,
   WordCollection,
 } from './data/types.ts';
-import { buildLexiconDatabase, validateCustomDatasetContent } from './data/parser.ts';
+import {
+  buildLexiconDatabase,
+  validateCustomDatasetContent,
+} from './data/parser.ts';
 import {
   DEFAULT_DICTIONARIES,
   DEFAULT_FILTER_CRITERIA,
-  escapeCsvField,
   filterAndSortWords,
 } from './data/searchAndFilter.ts';
 import {
-  batchApplyWordUpdates,
+  batchUpdateWords,
+  createOrUpdateCollection,
+  CustomDatasetRecord,
   db,
+  deleteCollection,
   ensureDefaultCollections,
-  exportFullBackupJson,
-  importBackupJson,
-  recordWordStudyTouch,
-  rollbackBatchById,
+  exportFullBackupPayload,
+  getAllCustomDatasets,
+  getAllUserWordRecords,
+  getRecentActivityLogs,
+  importFullBackupPayload,
+  resetCustomDatasets,
+  rollbackBatchLogs,
+  saveCustomDataset,
+  touchWordStudyRecord,
   undoSingleActivityLog,
+  updateWordNote,
+  updateWordPosStatus,
   updateWordStatus,
-  updateWordTagsAndNotes,
+  updateWordTags,
 } from './db/database.ts';
-import { GlobalSearchModal } from './components/GlobalSearchModal.tsx';
-import { WordDetailDrawer } from './components/WordDetailDrawer.tsx';
 import { ExploreView } from './components/ExploreView.tsx';
+import { CorpusLabView } from './components/CorpusLabView.tsx';
 import { WordFamilyView } from './components/WordFamilyView.tsx';
 import { CollectionsAndPlannerView } from './components/CollectionsAndPlannerView.tsx';
-import { BatchAndActivityView } from './components/BatchAndActivityView.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { SettingsAndDiagnosticsView } from './components/SettingsAndDiagnosticsView.tsx';
+import { WordDetailDrawer } from './components/WordDetailDrawer.tsx';
+import { GlobalSearchModal } from './components/GlobalSearchModal.tsx';
 
-type NavViewId =
-  | 'explore'
-  | 'families'
-  | 'collections'
-  | 'activity'
-  | 'analytics'
-  | 'settings';
+const DICT_STORAGE_KEY = 'lexical_workbench_dictionaries_v2';
+const THEME_STORAGE_KEY = 'lexical_workbench_theme_v2';
+const DENSITY_STORAGE_KEY = 'lexical_workbench_compact_density_v2';
 
-const NAV_ITEMS: {
-  id: NavViewId;
-  label: string;
-  shortLabel: string;
-  icon: React.ComponentType<{ className?: string }>;
-  mobileBottomNav?: boolean;
-}[] = [
-  { id: 'explore', label: '词条索引', shortLabel: '词库', icon: BookOpen, mobileBottomNav: true },
-  { id: 'families', label: '词族矩阵', shortLabel: '词族', icon: Layers, mobileBottomNav: true },
-  { id: 'collections', label: '词集规划', shortLabel: '词集', icon: Bookmark, mobileBottomNav: true },
-  { id: 'activity', label: '批量同步', shortLabel: '同步', icon: FileSpreadsheet, mobileBottomNav: true },
-  { id: 'analytics', label: '统计分析', shortLabel: '统计', icon: BarChart3, mobileBottomNav: true },
-  { id: 'settings', label: '数据设置', shortLabel: '设置', icon: Settings, mobileBottomNav: false },
-];
+export function App() {
+  const [lexicon, setLexicon] = useState<LexiconDatabaseBundle | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasCustomDataset, setHasCustomDataset] = useState<boolean>(false);
 
-const VALID_VIEWS = new Set<NavViewId>([
-  'explore',
-  'families',
-  'collections',
-  'activity',
-  'analytics',
-  'settings',
-]);
-
-function safeGetStorage(key: string): string | null {
-  try {
-    return typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
-  } catch {
-    return null;
-  }
-}
-
-function safeSetStorage(key: string, value: string): void {
-  try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(key, value);
-    }
-  } catch {
-    // Ignore SecurityError when storage is blocked in third-party iframe
-  }
-}
-
-function safeGetSearchParam(key: string): string | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    return new URLSearchParams(window.location.search).get(key);
-  } catch {
-    return null;
-  }
-}
-
-function triggerTextFileDownload(filename: string, content: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-export default function App() {
-  const [activeView, setActiveView] = useState<NavViewId>(() => {
-    const v = safeGetSearchParam('view') as NavViewId | null;
-    return v && VALID_VIEWS.has(v) ? v : 'explore';
-  });
-
-  const [bundle, setBundle] = useState<LexiconDatabaseBundle | null>(null);
-  const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [hasCustomDataset, setHasCustomDataset] = useState(false);
-
-  // User data from IndexedDB
-  const [userWords, setUserWords] = useState<UserWordRecord[]>([]);
-  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
+  const [userRecordsMap, setUserRecordsMap] = useState<Map<string, UserWordRecord>>(new Map());
   const [collections, setCollections] = useState<WordCollection[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
 
-  // Feedback toast banner
-  const [toast, setToast] = useState<{
-    message: string;
-    type: 'success' | 'error';
-  } | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
+  const [activeTab, setActiveTab] = useState<NavigationTab>('explore');
+  const [criteria, setCriteria] = useState<FilterCriteria>(DEFAULT_FILTER_CRITERIA);
+  const [sortBy, setSortBy] = useState<SortOption>('coca_rank_asc');
+  const [selectedStaticCollectionId, setSelectedStaticCollectionId] = useState<string | null>(
+    null
+  );
 
-  const showFeedbackToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
-    if (toastTimerRef.current) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    setToast({ message, type });
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-    }, 3200);
-  }, []);
+  const [selectedWordId, setSelectedWordId] = useState<string | null>('work');
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(true);
+  const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>('work');
+  const [familyHighlightWordId, setFamilyHighlightWordId] = useState<string | null>(null);
+  const [isCommandModalOpen, setIsCommandModalOpen] = useState<boolean>(false);
 
-  // UI preferences (stored in localStorage with safe fallback)
+  const exploreScrollOffsetRef = useRef<number>(0);
+
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return safeGetStorage('lexical_wb_dark') === 'true';
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+    } catch {
+      return false;
+    }
   });
+
   const [compactDensity, setCompactDensity] = useState<boolean>(() => {
-    const saved = safeGetStorage('lexical_wb_compact');
-    return saved ? saved === 'true' : true;
+    try {
+      const saved = localStorage.getItem(DENSITY_STORAGE_KEY);
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
   });
+
   const [dictionaries, setDictionaries] = useState<DictionaryTemplate[]>(() => {
     try {
-      const saved = safeGetStorage('lexical_wb_dicts');
-      if (saved) return JSON.parse(saved);
+      const raw = localStorage.getItem(DICT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {
       // ignore
     }
     return DEFAULT_DICTIONARIES;
   });
 
-  // Workspace state
-  const [criteria, setCriteria] = useState<FilterCriteria>(() => {
-    const q = safeGetSearchParam('q') || '';
-    return { ...DEFAULT_FILTER_CRITERIA, searchQuery: q };
-  });
-  const [activeStaticCollectionId, setActiveStaticCollectionId] = useState<string | null>(null);
-  // Default sort: Recommended Study Priority (leads with CET-4/CET-6 & 1k-3k content words instead of "the, of, and, s")
-  const [sortField, setSortField] = useState<SortField>('priority_weight_desc');
-  // Do not force-select 'able' or force-open the detail drawer unless ?word= is in URL
-  const [selectedWordId, setSelectedWordId] = useState<string | null>(() => {
-    return safeGetSearchParam('word') || null;
-  });
-  const [showDetailDrawer, setShowDetailDrawer] = useState<boolean>(() => {
-    return Boolean(safeGetSearchParam('word'));
-  });
-  const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null);
-  const [highlightedFamilyWordId, setHighlightedFamilyWordId] = useState<string | null>(null);
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
-  const [exploreScrollOffset, setExploreScrollOffset] = useState<number>(0);
-
-  const handleSwitchView = useCallback((nextView: NavViewId) => {
-    setActiveView(nextView);
-    if (nextView !== 'explore') {
-      setShowDetailDrawer(false);
-    }
-  }, []);
-
-  // Sync dark mode class on <html>
   useEffect(() => {
-    const root = document.documentElement;
-    if (darkMode) root.classList.add('dark');
-    else root.classList.remove('dark');
-    safeSetStorage('lexical_wb_dark', String(darkMode));
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, darkMode ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
   }, [darkMode]);
 
   useEffect(() => {
-    safeSetStorage('lexical_wb_compact', String(compactDensity));
+    try {
+      localStorage.setItem(DENSITY_STORAGE_KEY, String(compactDensity));
+    } catch {
+      // ignore
+    }
   }, [compactDensity]);
 
-  // Sync URL query parameters without polluting history stack
-  useEffect(() => {
-    try {
-      if (
-        typeof window === 'undefined' ||
-        !window.location.protocol.startsWith('http') ||
-        window.location.origin === 'null'
-      ) {
-        return;
-      }
-      const params = new URLSearchParams(window.location.search);
-      if (activeView !== 'explore') params.set('view', activeView);
-      else params.delete('view');
-
-      if (criteria.searchQuery.trim()) params.set('q', criteria.searchQuery.trim());
-      else params.delete('q');
-
-      if (selectedWordId && showDetailDrawer) params.set('word', selectedWordId);
-      else params.delete('word');
-
-      const qs = params.toString();
-      const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
-      const currentUrl = `${window.location.pathname}${window.location.search}`;
-      if (nextUrl !== currentUrl) {
-        window.history.replaceState(null, '', nextUrl);
-      }
-    } catch {
-      // Ignore SecurityError in restricted iframes
-    }
-  }, [activeView, criteria.searchQuery, selectedWordId, showDetailDrawer]);
-
-  const handleSaveDictionaries = (next: DictionaryTemplate[]) => {
+  const handleSaveDictionaries = useCallback((next: DictionaryTemplate[]) => {
     setDictionaries(next);
-    safeSetStorage('lexical_wb_dicts', JSON.stringify(next));
-  };
-
-  // Load IndexedDB state
-  const refreshUserDbState = useCallback(async () => {
     try {
-      await ensureDefaultCollections();
-      const [uWords, logs, cols] = await Promise.all([
-        db.userWords.toArray(),
-        db.activityLogs.orderBy('id').reverse().toArray(),
-        db.collections.toArray(),
-      ]);
-      setUserWords(uWords);
-      setActivityLogs(logs);
-      setCollections(cols);
+      localStorage.setItem(DICT_STORAGE_KEY, JSON.stringify(next));
     } catch {
-      // Ignore storage security errors in restricted private/iframe contexts
+      // ignore
     }
   }, []);
 
-  const rawTextsRef = useRef<{ cetText: string; bncText: string }>({
-    cetText: '',
-    bncText: '',
-  });
+  const refreshUserStoreData = useCallback(async () => {
+    await ensureDefaultCollections();
+    const [recordsList, cols, logs] = await Promise.all([
+      getAllUserWordRecords(),
+      db.collections.toArray(),
+      getRecentActivityLogs(1500),
+    ]);
+    setUserRecordsMap(new Map(recordsList.map((r) => [r.wordId, r])));
+    setCollections(cols);
+    setActivityLogs(logs);
+  }, []);
 
-  // Load Lexicon Data ONCE (no dependency on selectedFamilyId so switching families never reloads the corpus!)
+  const fetchTextWithFallback = async (primaryUrl: string, fallbackUrl: string) => {
+    const res1 = await fetch(primaryUrl);
+    if (res1.ok) {
+      const text = await res1.text();
+      if (!text.trim().startsWith('<!doctype html')) return text;
+    }
+    const res2 = await fetch(fallbackUrl);
+    if (res2.ok) {
+      return await res2.text();
+    }
+    throw new Error(`无法加载语料文件: ${primaryUrl}`);
+  };
+
   const loadLexiconData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
     try {
-      setLoadingError(null);
-      let customCet: { content: string } | undefined;
-      let customBnc: { content: string } | undefined;
-      try {
-        customCet = await db.customDatasets.get('cet2016');
-        customBnc = await db.customDatasets.get('bnc_coca');
-      } catch {
-        // Ignore IndexedDB error if blocked in private iframe
-      }
-      setHasCustomDataset(Boolean(customCet || customBnc));
+      const customSets: CustomDatasetRecord[] = await getAllCustomDatasets();
+      const customCet = customSets.find((d) => d.id === 'cet2016');
+      const customBnc = customSets.find((d) => d.id === 'bnc_coca');
+      const customCoca = customSets.find((d) => d.id === 'coca2020');
+      setHasCustomDataset(Boolean(customCet || customBnc || customCoca));
 
       let cetText = customCet?.content || '';
       let bncText = customBnc?.content || '';
+      let cocaText = customCoca?.content || '';
 
-      const base = import.meta.env.BASE_URL || '/';
-      const normalizedBase = base.endsWith('/') ? base : `${base}/`;
-      const resolvePublicUrl = (relPath: string) =>
-        `${normalizedBase}${relPath.replace(/^\/+/, '')}`;
+      const baseUrl = import.meta.env.BASE_URL || '/';
 
+      const tasks: Promise<void>[] = [];
       if (!cetText) {
-        let res = await fetch(resolvePublicUrl('data/CET2016.txt')).catch(() => null);
-        if (!res || !res.ok) {
-          res = await fetch(resolvePublicUrl('assets/aistudio/CET2016_c8581113.txt')).catch(
-            () => null
-          );
-        }
-        if (!res || !res.ok) throw new Error('无法读取 CET2016.txt 词表文件');
-        cetText = await res.text();
+        tasks.push(
+          fetchTextWithFallback(
+            `${baseUrl}data/CET2016.txt`,
+            `${baseUrl}assets/aistudio/CET2016_c8581113.txt`
+          ).then((t) => {
+            cetText = t;
+          })
+        );
       }
-
       if (!bncText) {
-        let res = await fetch(resolvePublicUrl('data/BNC_COCA_lists.txt')).catch(() => null);
-        if (!res || !res.ok) {
-          res = await fetch(resolvePublicUrl('assets/aistudio/BNC_COCA_lists_9ec2b6a0.txt')).catch(
-            () => null
-          );
-        }
-        if (!res || !res.ok) throw new Error('无法读取 BNC_COCA_lists.txt 词表文件');
-        bncText = await res.text();
+        tasks.push(
+          fetchTextWithFallback(
+            `${baseUrl}data/BNC_COCA_lists.txt`,
+            `${baseUrl}assets/aistudio/BNC_COCA_lists_9ec2b6a0.txt`
+          ).then((t) => {
+            bncText = t;
+          })
+        );
+      }
+      if (!cocaText) {
+        tasks.push(
+          fetchTextWithFallback(
+            `${baseUrl}data/coca_freq.json`,
+            `${baseUrl}assets/aistudio/coca_freq_5e7c1609.json`
+          ).then((t) => {
+            cocaText = t;
+          })
+        );
       }
 
-      const built = buildLexiconDatabase(cetText, bncText);
-      rawTextsRef.current = { cetText, bncText };
-      setBundle(built);
-      setSelectedFamilyId((prev) => {
-        if (prev && built.families.some((f) => f.id === prev)) return prev;
-        const ableFam =
-          built.families.find((f) => f.normalizedHeadword === 'able') || built.families[0];
-        return ableFam ? ableFam.id : null;
-      });
+      if (tasks.length > 0) {
+        await Promise.all(tasks);
+      }
+
+      const built = buildLexiconDatabase(cetText, bncText, cocaText);
+      setLexicon(built);
+      await refreshUserStoreData();
     } catch (err) {
-      setLoadingError(err instanceof Error ? err.message : '加载词库数据失败');
+      setLoadError(err instanceof Error ? err.message : '解析多源词库时发生未知错误');
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
+  }, [refreshUserStoreData]);
 
   useEffect(() => {
     loadLexiconData();
-    refreshUserDbState();
-  }, [loadLexiconData, refreshUserDbState]);
+  }, [loadLexiconData]);
 
-  // Fast Lookup Maps
-  const wordsMap = useMemo(() => {
-    if (!bundle) return new Map<string, LexiconWordItem>();
-    return new Map(bundle.words.map((w) => [w.id, w]));
-  }, [bundle]);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-  const familiesMap = useMemo(() => {
-    if (!bundle) return new Map<string, BncCocaFamily>();
-    return new Map(bundle.families.map((f) => [f.id, f]));
-  }, [bundle]);
+  const staticCollections = useMemo(
+    () => collections.filter((c) => c.type === 'static' || c.type === 'study_plan'),
+    [collections]
+  );
 
-  const userRecordsMap = useMemo(() => {
-    return new Map(userWords.map((u) => [u.wordId, u]));
-  }, [userWords]);
-
-  const allKnownTags = useMemo(() => {
-    const set = new Set<string>();
-    for (const u of userWords) {
-      for (const t of u.tags || []) set.add(t);
-    }
-    return Array.from(set).sort();
-  }, [userWords]);
-
-  const filteredWords = useMemo(() => {
-    if (!bundle) return [];
-    let baseWords = bundle.words;
-    if (activeStaticCollectionId) {
-      const col = collections.find((c) => c.id === activeStaticCollectionId);
-      if (col && col.type !== 'dynamic') {
-        const idSet = new Set(col.wordIds);
-        baseWords = baseWords.filter((w) => idSet.has(w.id));
+  const allAvailableTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const rec of userRecordsMap.values()) {
+      for (const t of rec.tags || []) {
+        tagSet.add(t);
       }
     }
+    return Array.from(tagSet).sort();
+  }, [userRecordsMap]);
+
+  const wordsMap = useMemo(() => {
+    if (!lexicon) return new Map<string, LexiconWordItem>();
+    return new Map(lexicon.words.map((w) => [w.id, w]));
+  }, [lexicon]);
+
+  const familiesMap = useMemo(() => {
+    if (!lexicon) return new Map();
+    return new Map(lexicon.families.map((f) => [f.id, f]));
+  }, [lexicon]);
+
+  const variantToWordsMap = useMemo(() => {
+    const m = new Map<string, LexiconWordItem[]>();
+    if (!lexicon) return m;
+    for (const w of lexicon.words) {
+      for (const v of w.displayVariants) {
+        const k = v.toLowerCase();
+        const arr = m.get(k);
+        if (arr) arr.push(w);
+        else m.set(k, [w]);
+      }
+    }
+    return m;
+  }, [lexicon]);
+
+  const filteredWords = useMemo(() => {
+    if (!lexicon) return [];
+    let staticSet: Set<string> | undefined;
+    if (selectedStaticCollectionId) {
+      const col = collections.find((c) => c.id === selectedStaticCollectionId);
+      if (col) staticSet = new Set(col.wordIds);
+    }
+    const baseWords = staticSet
+      ? lexicon.words.filter((w) => staticSet!.has(w.id))
+      : lexicon.words;
     return filterAndSortWords(
       baseWords,
       userRecordsMap,
       criteria,
-      sortField,
+      sortBy,
       familiesMap
     );
-  }, [bundle, activeStaticCollectionId, collections, userRecordsMap, criteria, sortField, familiesMap]);
+  }, [
+    lexicon,
+    userRecordsMap,
+    criteria,
+    sortBy,
+    selectedStaticCollectionId,
+    collections,
+    familiesMap,
+  ]);
 
   const selectedWord = useMemo(() => {
     if (!selectedWordId) return null;
     return wordsMap.get(selectedWordId) || null;
   }, [wordsMap, selectedWordId]);
 
-  const selectedWordFamily = useMemo(() => {
-    if (!selectedWord?.familyId) return null;
-    return familiesMap.get(selectedWord.familyId) || null;
-  }, [selectedWord, familiesMap]);
-
   const selectedWordLogs = useMemo(() => {
     if (!selectedWordId) return [];
     return activityLogs.filter((l) => l.wordId === selectedWordId);
   }, [activityLogs, selectedWordId]);
 
+  // Handlers
   const handleStatusChange = useCallback(
     async (wordId: string, wordDisplay: string, status: LearningStatus) => {
-      try {
-        await updateWordStatus(wordId, wordDisplay, status);
-        await refreshUserDbState();
-        showFeedbackToast(
-          `已将「${wordDisplay}」标记为「${LEARNING_STATUS_META[status].label}」`
-        );
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '保存学习状态失败', 'error');
-      }
+      await updateWordStatus(wordId, wordDisplay, status, '手动标注');
+      await refreshUserStoreData();
     },
-    [refreshUserDbState, showFeedbackToast]
+    [refreshUserStoreData]
   );
 
-  const handleStudyTouch = useCallback(
+  const handlePosStatusChange = useCallback(
+    async (wordId: string, wordDisplay: string, pos: CocaRawPos, status: LearningStatus) => {
+      await updateWordPosStatus(wordId, wordDisplay, pos, status, '分词性标注');
+      await refreshUserStoreData();
+    },
+    [refreshUserStoreData]
+  );
+
+  const handleTagsChange = useCallback(
+    async (wordId: string, wordDisplay: string, tags: string[]) => {
+      await updateWordTags(wordId, wordDisplay, tags);
+      await refreshUserStoreData();
+    },
+    [refreshUserStoreData]
+  );
+
+  const handleNoteChange = useCallback(
+    async (wordId: string, wordDisplay: string, note: string) => {
+      await updateWordNote(wordId, wordDisplay, note);
+      await refreshUserStoreData();
+    },
+    [refreshUserStoreData]
+  );
+
+  const handleTouchStudyRecord = useCallback(
     async (wordId: string, wordDisplay: string) => {
-      try {
-        const updated = await recordWordStudyTouch(wordId, wordDisplay);
-        await refreshUserDbState();
-        showFeedbackToast(
-          `已记录「${wordDisplay}」本次学习（累计第 ${updated.studyCount || 1} 次）`
-        );
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '记录学习次数失败', 'error');
-      }
+      await touchWordStudyRecord(wordId, wordDisplay);
+      await refreshUserStoreData();
     },
-    [refreshUserDbState, showFeedbackToast]
-  );
-
-  // Global keyboard shortcuts: Ctrl+K / '/', and 1-5 status shortcuts for non-explore views
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setIsSearchModalOpen(true);
-        return;
-      }
-
-      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
-      const isEditable =
-        tag === 'input' ||
-        tag === 'textarea' ||
-        tag === 'select' ||
-        (e.target as HTMLElement | null)?.isContentEditable;
-
-      if (isEditable || isSearchModalOpen) return;
-
-      if (e.key === '/') {
-        e.preventDefault();
-        setIsSearchModalOpen(true);
-        return;
-      }
-
-      if (activeView !== 'explore' && selectedWord && ['1', '2', '3', '4', '5'].includes(e.key)) {
-        const statusByNum: Record<string, LearningStatus> = {
-          '1': 'unrated',
-          '2': 'queued',
-          '3': 'learning',
-          '4': 'mastered',
-          '5': 'deferred',
-        };
-        const nextSt = statusByNum[e.key];
-        if (nextSt) {
-          e.preventDefault();
-          handleStatusChange(selectedWord.id, selectedWord.word, nextSt);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isSearchModalOpen, selectedWord, activeView, handleStatusChange]);
-
-  const handleSelectWord = useCallback((word: LexiconWordItem, openDrawer = true) => {
-    setSelectedWordId(word.id);
-    if (openDrawer) {
-      setShowDetailDrawer(true);
-    }
-  }, []);
-
-  const handleSelectWordById = useCallback(
-    (wordId: string) => {
-      const w = wordsMap.get(wordId.toLowerCase());
-      if (w) {
-        setSelectedWordId(w.id);
-        setShowDetailDrawer(true);
-      }
-    },
-    [wordsMap]
-  );
-
-  const handleInspectFamily = useCallback(
-    (familyId: string, highlightWordId?: string) => {
-      setSelectedFamilyId(familyId);
-      setHighlightedFamilyWordId(highlightWordId || null);
-      if (highlightWordId && wordsMap.has(highlightWordId)) {
-        setSelectedWordId(highlightWordId);
-      }
-      setActiveView('families');
-      setShowDetailDrawer(false);
-    },
-    [wordsMap]
-  );
-
-  const handleSaveTagsAndNotes = useCallback(
-    async (wordId: string, wordDisplay: string, tags: string[], notes: string) => {
-      try {
-        await updateWordTagsAndNotes(wordId, wordDisplay, tags, notes);
-        await refreshUserDbState();
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '保存标签或笔记失败', 'error');
-        throw err;
-      }
-    },
-    [refreshUserDbState, showFeedbackToast]
+    [refreshUserStoreData]
   );
 
   const handleBatchSetStatus = useCallback(
-    async (wordIds: string[], status: LearningStatus) => {
+    async (wordIds: string[], status: LearningStatus, label = '批量更改状态') => {
+      if (!lexicon || wordIds.length === 0) return;
       const items = wordIds
-        .map((id) => wordsMap.get(id))
-        .filter((w): w is LexiconWordItem => Boolean(w))
-        .map((w) => ({ wordId: w.id, word: w.word, status }));
-      if (items.length === 0) return;
-      try {
-        await batchApplyWordUpdates(items, {
-          defaultStatus: status,
-          sourceLabel: `批量设置状态 (${items.length}词)`,
-        });
-        await refreshUserDbState();
-        showFeedbackToast(
-          `已将 ${items.length} 个词条批量设为「${LEARNING_STATUS_META[status].label}」`
-        );
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '批量更新状态失败', 'error');
-      }
+        .map((id) => {
+          const w = wordsMap.get(id);
+          return w ? { wordId: w.id, word: w.word, status } : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => Boolean(x));
+
+      await batchUpdateWords(items, {
+        defaultStatus: status,
+        commonTags: [],
+        sourceLabel: label,
+      });
+      await refreshUserStoreData();
     },
-    [wordsMap, refreshUserDbState, showFeedbackToast]
+    [lexicon, wordsMap, refreshUserStoreData]
   );
 
   const handleBatchAddTag = useCallback(
     async (wordIds: string[], tag: string) => {
-      const cleanTag = tag.trim().replace(/^#/, '');
-      if (!cleanTag) return;
+      if (!lexicon || wordIds.length === 0 || !tag.trim()) return;
       const items = wordIds
-        .map((id) => wordsMap.get(id))
-        .filter((w): w is LexiconWordItem => Boolean(w))
-        .map((w) => ({ wordId: w.id, word: w.word, tagsToAdd: [cleanTag] }));
-      if (items.length === 0) return;
-      try {
-        await batchApplyWordUpdates(items, {
-          sourceLabel: `批量添加标签 #${cleanTag}`,
-        });
-        await refreshUserDbState();
-        showFeedbackToast(`已为 ${items.length} 个词条附加标签 #${cleanTag}（保持原学习状态不变）`);
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '批量添加标签失败', 'error');
-      }
+        .map((id) => {
+          const w = wordsMap.get(id);
+          return w ? { wordId: w.id, word: w.word } : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => Boolean(x));
+
+      await batchUpdateWords(items, {
+        defaultStatus: 'unrated',
+        commonTags: [tag.trim()],
+        preserveExistingStatus: true,
+        sourceLabel: `批量添加标签 #${tag.trim()}`,
+      });
+      await refreshUserStoreData();
     },
-    [wordsMap, refreshUserDbState, showFeedbackToast]
+    [lexicon, wordsMap, refreshUserStoreData]
   );
 
-  const handleCreateCollection = useCallback(
-    async (col: Omit<WordCollection, 'id' | 'createdAt' | 'updatedAt'>) => {
-      try {
-        const now = new Date().toISOString();
-        const newCol: WordCollection = {
-          ...col,
-          id: `col_${Date.now()}`,
-          createdAt: now,
-          updatedAt: now,
-        };
-        await db.collections.put(newCol);
-        await refreshUserDbState();
-        showFeedbackToast(`已创建词集「${newCol.name}」`);
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '创建词集失败', 'error');
-      }
-    },
-    [refreshUserDbState, showFeedbackToast]
-  );
-
-  const handleDeleteCollection = useCallback(
-    async (id: string) => {
-      try {
-        if (activeStaticCollectionId === id) {
-          setActiveStaticCollectionId(null);
-        }
-        await db.collections.delete(id);
-        await refreshUserDbState();
-        showFeedbackToast('已删除词集');
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '删除词集失败', 'error');
-      }
-    },
-    [activeStaticCollectionId, refreshUserDbState, showFeedbackToast]
-  );
-
-  const handleAddWordToStaticCollection = useCallback(
+  const handleToggleWordInCollection = useCallback(
     async (collectionId: string, wordId: string) => {
-      try {
-        const col = await db.collections.get(collectionId);
-        if (!col) return;
-        const exists = col.wordIds.includes(wordId);
-        const nextIds = exists
-          ? col.wordIds.filter((id) => id !== wordId)
-          : [...col.wordIds, wordId];
-        await db.collections.put({
-          ...col,
-          wordIds: nextIds,
-          updatedAt: new Date().toISOString(),
-        });
-        await refreshUserDbState();
-        showFeedbackToast(
-          exists ? `已从「${col.name}」移除` : `已加入词集「${col.name}」`
-        );
-      } catch (err) {
-        showFeedbackToast(err instanceof Error ? err.message : '更新词集失败', 'error');
+      const col = collections.find((c) => c.id === collectionId);
+      if (!col) return;
+      const hasWord = col.wordIds.includes(wordId);
+      const nextWordIds = hasWord
+        ? col.wordIds.filter((id) => id !== wordId)
+        : [...col.wordIds, wordId];
+      await createOrUpdateCollection({
+        ...col,
+        wordIds: nextWordIds,
+      });
+      await refreshUserStoreData();
+    },
+    [collections, refreshUserStoreData]
+  );
+
+  const handleAddWordsToStaticCollection = useCallback(
+    async (collectionId: string, wordIds: string[]) => {
+      const col = collections.find((c) => c.id === collectionId);
+      if (!col) return;
+      const merged = Array.from(new Set([...col.wordIds, ...wordIds]));
+      await createOrUpdateCollection({
+        ...col,
+        wordIds: merged,
+      });
+      await refreshUserStoreData();
+    },
+    [collections, refreshUserStoreData]
+  );
+
+  const handleCreateStaticCollectionFromSelection = useCallback(
+    async (name: string, wordIds: string[]) => {
+      await createOrUpdateCollection({
+        name,
+        description: `从探索视图选区创建 (${wordIds.length} 词)`,
+        type: 'static',
+        entityType: 'mixed',
+        wordIds: Array.from(new Set(wordIds)),
+      });
+      await refreshUserStoreData();
+    },
+    [refreshUserStoreData]
+  );
+
+  const handleSaveDynamicCollection = useCallback(
+    async (name: string, description: string) => {
+      await createOrUpdateCollection({
+        name,
+        description,
+        type: 'dynamic',
+        entityType: 'headword',
+        wordIds: [],
+        filterCriteria: criteria,
+        sortField: sortBy,
+      });
+      await refreshUserStoreData();
+    },
+    [criteria, sortBy, refreshUserStoreData]
+  );
+
+  const handleInspectFamily = useCallback((familyId: string, highlightWord?: string) => {
+    setSelectedFamilyId(familyId);
+    setFamilyHighlightWordId(highlightWord || null);
+    setActiveTab('families');
+  }, []);
+
+  const handleSelectWord = useCallback((word: LexiconWordItem, openDrawer = true) => {
+    setSelectedWordId(word.id);
+    if (openDrawer) setIsDrawerOpen(true);
+  }, []);
+
+  const handleSelectWordByString = useCallback(
+    (wordStr: string) => {
+      const key = wordStr.trim().toLowerCase();
+      const found = wordsMap.get(key) || variantToWordsMap.get(key)?.[0];
+      if (found) {
+        setSelectedWordId(found.id);
+        setIsDrawerOpen(true);
       }
     },
-    [refreshUserDbState, showFeedbackToast]
+    [wordsMap, variantToWordsMap]
   );
 
   const handleExportWordList = useCallback(
@@ -627,235 +501,213 @@ export default function App() {
       const dateStr = new Date().toISOString().slice(0, 10);
       if (format === 'txt') {
         const content = list.map((w) => w.word).join('\n');
-        triggerTextFileDownload(
-          `${filenamePrefix}_${dateStr}.txt`,
-          content,
-          'text/plain;charset=utf-8'
-        );
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filenamePrefix}-${dateStr}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
       } else {
-        const header =
-          'Word,CET_Levels,BNC_Band,Headword,Form_Frequency,Family_Frequency,Learning_Status,Tags,Notes\n';
+        const header = [
+          '词条(Word)',
+          '规范化ID',
+          'COCA最佳排名',
+          'COCA主词性',
+          'COCA词头合计频次',
+          'CET4',
+          'CET6',
+          'BNC频段',
+          'BNC词族首词',
+          'BNC词形频次',
+          'BNC词族总频次',
+          '个人状态',
+          '标签',
+          '笔记',
+        ];
         const rows = list.map((w) => {
           const rec = userRecordsMap.get(w.id);
-          const status = rec?.status || 'unrated';
-          const tags = (rec?.tags || []).join(';');
-          const notes = rec?.notes || '';
           return [
-            escapeCsvField(w.word),
-            escapeCsvField(w.cetLevels.join('/')),
-            escapeCsvField(w.band || ''),
-            escapeCsvField(w.headword || ''),
-            w.formFrequency !== null ? String(w.formFrequency) : '',
-            w.familyFrequency !== null ? String(w.familyFrequency) : '',
-            escapeCsvField(status),
-            escapeCsvField(tags),
-            escapeCsvField(notes),
+            `"${w.word.replace(/"/g, '""')}"`,
+            `"${w.id.replace(/"/g, '""')}"`,
+            w.cocaBestPosRank ?? '',
+            w.cocaPrimaryPos ?? '',
+            w.cocaHeadwordTotalFreq ?? '',
+            w.isCet4 ? 'Y' : 'N',
+            w.isCet6 ? 'Y' : 'N',
+            w.band || '',
+            `"${(w.headword || '').replace(/"/g, '""')}"`,
+            w.formFrequency !== null ? w.formFrequency : '',
+            w.familyFrequency !== null ? w.familyFrequency : '',
+            rec?.status || 'unrated',
+            `"${(rec?.tags || []).join(';').replace(/"/g, '""')}"`,
+            `"${(rec?.notes || '').replace(/"/g, '""')}"`,
           ].join(',');
         });
-        triggerTextFileDownload(
-          `${filenamePrefix}_${dateStr}.csv`,
-          '\uFEFF' + header + rows.join('\n'),
-          'text/csv;charset=utf-8'
-        );
+        const csv = '\uFEFF' + [header.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filenamePrefix}-${dateStr}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
       }
-      showFeedbackToast(`已导出 ${list.length.toLocaleString()} 条词汇 (${format.toUpperCase()})`);
     },
-    [userRecordsMap, showFeedbackToast]
+    [userRecordsMap]
   );
 
   const handleExportLogsCsv = useCallback(() => {
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const header = 'Timestamp,Word,ActionType,PreviousStatus,NewStatus,Tags,SourceLabel\n';
-    const rows = activityLogs.map((l) => {
-      return [
-        escapeCsvField(l.timestamp),
-        escapeCsvField(l.word),
-        escapeCsvField(l.actionType),
-        escapeCsvField(l.previousStatus || ''),
-        escapeCsvField(l.newStatus || ''),
-        escapeCsvField((l.newTags || []).join(';')),
-        escapeCsvField(l.sourceLabel || ''),
-      ].join(',');
-    });
-    triggerTextFileDownload(
-      `LexicalWorkbench_ActivityLogs_${dateStr}.csv`,
-      '\uFEFF' + header + rows.join('\n'),
-      'text/csv;charset=utf-8'
+    const header = ['ID', '时间', '词条', '动作类型', '词性', '原状态', '新状态', '来源标记'];
+    const rows = activityLogs.map((l) =>
+      [
+        l.id || '',
+        l.timestamp,
+        `"${l.word.replace(/"/g, '""')}"`,
+        l.actionType,
+        l.targetPos || '',
+        l.previousStatus || '',
+        l.newStatus || '',
+        `"${(l.sourceLabel || '').replace(/"/g, '""')}"`,
+      ].join(',')
     );
-    showFeedbackToast(`已导出 ${activityLogs.length.toLocaleString()} 条变更日志`);
-  }, [activityLogs, showFeedbackToast]);
+    const csv = '\uFEFF' + [header.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lexical-activity-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [activityLogs]);
 
-  if (loadingError) {
+  const handleExportBackupJson = useCallback(async () => {
+    const payload = await exportFullBackupPayload();
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lexical-workbench-v2-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-canvas)]">
-        <div className="max-w-md w-full bg-[var(--bg-surface)] border border-red-500/30 rounded-md p-6 text-center space-y-3">
-          <h1 className="text-base font-semibold text-red-600 dark:text-red-400">
-            词库初始化失败
-          </h1>
-          <p className="text-xs text-[var(--text-secondary)]">{loadingError}</p>
-          <div className="flex items-center justify-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={loadLexiconData}
-              className="focus-ring px-4 py-2 rounded text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
-            >
-              重试加载
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await db.customDatasets.clear();
-                } catch {
-                  // ignore
-                }
-                await loadLexiconData();
-              }}
-              className="focus-ring px-4 py-2 rounded text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:border-[var(--accent-primary)] cursor-pointer"
-            >
-              恢复内置词表并重试
-            </button>
-          </div>
-        </div>
+      <div className="min-h-screen bg-[var(--bg-canvas)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-10 h-10 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mb-4" />
+        <h1 className="font-serif-lexicon text-xl font-bold text-[var(--text-primary)]">
+          正在构建 Lexical Workbench 2.0 多源语料知识库…
+        </h1>
+        <p className="text-xs text-[var(--text-secondary)] mt-1.5 max-w-md">
+          正在实时对齐 COCA 2020 (60,000 词元+词性记录)、Nation BNC/COCA 2.0 (25,002 词族 / 76,125 词形) 与 CET2016 (5,377 条官方考纲词目)
+        </p>
       </div>
     );
   }
 
-  if (!bundle) {
+  if (loadError || !lexicon) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[var(--bg-canvas)]">
-        <div
-          translate="no"
-          className="font-serif-lexicon font-bold text-xl tracking-tight text-[var(--text-primary)] mb-2"
-        >
-          Lexical Workbench
-        </div>
-        <div className="text-xs font-mono-tabular text-[var(--text-muted)]">
-          正在载入 BNC/COCA 25k 与 CET2016 词库索引…
-        </div>
-      </div>
-    );
-  }
-
-  const staticCollections = collections.filter((c) => c.type === 'static');
-  const mobileNavItems = NAV_ITEMS.filter((item) => item.mobileBottomNav);
-
-  return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      {/* Skip to Main Content Link */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-1.5 focus:rounded focus:bg-[var(--accent-primary)] focus:text-white focus:text-xs focus:font-semibold"
-      >
-        跳转到主内容
-      </a>
-
-      {/* Non-intrusive Feedback Toast */}
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`fixed bottom-16 md:bottom-5 right-4 z-50 max-w-sm px-3.5 py-2 rounded-lg shadow-lg border text-xs font-medium flex items-center gap-2 transition-all ${
-            toast.type === 'error'
-              ? 'bg-rose-50 dark:bg-rose-950/90 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
-              : 'bg-[var(--bg-surface)] border-[var(--border-strong)] text-[var(--text-primary)]'
-          }`}
-        >
-          {toast.type === 'error' ? (
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 shrink-0" />
-          ) : (
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          )}
-          <span className="flex-1 leading-snug">{toast.message}</span>
+      <div className="min-h-screen bg-[var(--bg-canvas)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md p-6 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+          <h2 className="text-base font-bold text-rose-600">词库加载失败</h2>
+          <p className="text-xs text-[var(--text-secondary)]">{loadError}</p>
           <button
             type="button"
-            onClick={() => setToast(null)}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 cursor-pointer"
-            aria-label="关闭提示"
+            onClick={loadLexiconData}
+            className="px-4 py-2 rounded-md text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
           >
-            <X className="w-3 h-3" />
+            重试加载
           </button>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* 3-Zone Top Bar Contract (Brand | Underlined Nav | Quick Search & Theme) */}
-      <header className="h-12 px-3 sm:px-4 lg:px-5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 sm:gap-3 lg:gap-6 shrink-0 z-20">
-        {/* Zone 1: Editorial Wordmark */}
-        <button
-          type="button"
-          onClick={() => handleSwitchView('explore')}
-          className="flex items-baseline gap-2.5 shrink-0 cursor-pointer focus-ring rounded min-w-0"
-        >
-          <span
-            translate="no"
-            className="font-serif-lexicon font-bold text-[15px] sm:text-[17px] tracking-tight text-[var(--text-primary)] whitespace-nowrap truncate"
-          >
-            Lexical Workbench
-          </span>
-          <span className="hidden 2xl:inline text-[11px] font-mono-tabular text-[var(--text-muted)] whitespace-nowrap">
-            BNC 25k · CET 2016
-          </span>
-        </button>
+  const navItems: {
+    id: NavigationTab;
+    label: string;
+    shortLabel: string;
+    icon: React.FC<{ className?: string }>;
+  }[] = [
+    { id: 'explore', label: '词汇探索', shortLabel: '探索', icon: Compass },
+    { id: 'corpus_lab', label: '语料实验室', shortLabel: '语料', icon: FlaskConical },
+    { id: 'families', label: '词族图谱', shortLabel: '词族', icon: Layers },
+    { id: 'study', label: '学习工作台', shortLabel: '学习', icon: BookmarkCheck },
+    { id: 'insights', label: '学习洞察', shortLabel: '洞察', icon: BarChart3 },
+    { id: 'data_studio', label: '数据中心', shortLabel: '数据', icon: Database },
+  ];
 
-        {/* Zone 2: Clean Underlined Navigation Links (Zero Pill Clutter, Single-Line) */}
+  return (
+    <div className="h-[100dvh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)] overflow-hidden">
+      {/* 3-Zone Top Header Bar */}
+      <header className="h-12 px-3 sm:px-5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 shrink-0 z-20">
+        {/* Zone 1: Brand Identity */}
+        <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-[var(--accent-primary)] flex items-center justify-center text-white font-serif-lexicon font-bold text-sm shadow-2xs shrink-0">
+            L
+          </div>
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-serif-lexicon font-bold text-sm sm:text-base tracking-tight text-[var(--text-primary)] truncate">
+              Lexical Workbench
+            </span>
+            <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold">
+              2.0
+            </span>
+            <span className="hidden 2xl:inline text-[11px] font-mono-tabular text-[var(--text-muted)] truncate">
+              COCA 60k · BNC 25k族 · CET 考纲
+            </span>
+          </div>
+        </div>
+
+        {/* Zone 2: Desktop 6-Workspace Navigation */}
         <nav
-          aria-label="主导航"
-          className="hidden md:flex items-center gap-3 lg:gap-5 h-full select-none overflow-x-auto no-scrollbar"
+          aria-label="主工作区导航"
+          className="hidden md:flex items-center gap-0.5 bg-[var(--bg-subtle)] p-1 rounded-lg border border-[var(--border-subtle)]"
         >
-          {NAV_ITEMS.map((item) => {
-            const active = activeView === item.id;
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => handleSwitchView(item.id)}
-                className={`h-full px-1 border-b-2 text-xs transition-colors cursor-pointer inline-flex items-center whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'border-[var(--accent-primary)] text-[var(--accent-primary)] font-semibold'
-                    : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-medium'
+                onClick={() => setActiveTab(item.id)}
+                className={`px-2.5 lg:px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer focus-ring ${
+                  isActive
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] shadow-2xs font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
+                <Icon className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>{item.label}</span>
               </button>
             );
           })}
         </nav>
 
-        {/* Zone 3: Global Command Search (⌘K) + Theme + Inspector Sheet Toggle */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Zone 3: Global Command Search & Theme Toggle */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
-            onClick={() => setIsSearchModalOpen(true)}
-            className="focus-ring h-8 px-2 sm:px-2.5 lg:px-3 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--accent-primary)] transition-colors flex items-center gap-1.5 sm:gap-2 text-xs text-[var(--text-secondary)] cursor-pointer whitespace-nowrap shrink-0"
-            title="全局词库检索 (⌘K)"
+            onClick={() => setIsCommandModalOpen(true)}
+            className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--border-strong)] text-xs text-[var(--text-secondary)] inline-flex items-center gap-2 transition-colors cursor-pointer focus-ring"
+            title="全局词库快速检索 (Ctrl+K / ⌘K)"
           >
-            <Search className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" aria-hidden="true" />
-            <span className="hidden lg:inline">检索词库…</span>
-            <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono-tabular rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
+            <Search className="w-3.5 h-3.5 text-[var(--accent-primary)]" aria-hidden="true" />
+            <span className="hidden sm:inline">全局检索…</span>
+            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[var(--bg-subtle)] rounded border border-[var(--border-subtle)] text-[var(--text-muted)]">
               ⌘K
             </kbd>
           </button>
 
           <button
             type="button"
-            onClick={() => handleSwitchView('settings')}
-            className={`focus-ring md:hidden p-1.5 rounded border transition-colors cursor-pointer ${
-              activeView === 'settings'
-                ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                : 'border-[var(--border-subtle)] text-[var(--text-secondary)]'
-            }`}
-            title="数据设置"
-            aria-label="数据设置"
-          >
-            <Settings className="w-4 h-4" aria-hidden="true" />
-          </button>
-
-          <button
-            type="button"
             onClick={() => setDarkMode((d) => !d)}
-            className="focus-ring p-1.5 rounded border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-            title={darkMode ? '切换浅色模式' : '切换深色模式'}
-            aria-label="切换色彩主题"
+            className="p-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] cursor-pointer focus-ring"
+            title={darkMode ? '切换至浅色模式' : '切换至深色模式'}
+            aria-label={darkMode ? '切换至浅色模式' : '切换至深色模式'}
           >
             {darkMode ? (
               <Sun className="w-4 h-4 text-amber-400" aria-hidden="true" />
@@ -863,220 +715,247 @@ export default function App() {
               <Moon className="w-4 h-4" aria-hidden="true" />
             )}
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (!showDetailDrawer && !selectedWordId && filteredWords.length > 0) {
-                setSelectedWordId(filteredWords[0].id);
-              }
-              setShowDetailDrawer((v) => !v);
-            }}
-            className={`focus-ring p-1.5 rounded border transition-colors cursor-pointer ${
-              showDetailDrawer && selectedWord
-                ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
-                : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-            title={showDetailDrawer ? '收起词典面板' : '展开词典面板'}
-            aria-label="切换词条详情面板"
-          >
-            {showDetailDrawer && selectedWord ? (
-              <PanelRightClose className="w-4 h-4" aria-hidden="true" />
-            ) : (
-              <PanelRightOpen className="w-4 h-4" aria-hidden="true" />
-            )}
-          </button>
         </div>
       </header>
 
-      {/* Main Full-Height Architectural Grid Workspace */}
-      <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        <main
-          id="main-content"
-          className="flex-1 min-w-0 h-full overflow-hidden flex flex-col"
-        >
-          {activeView === 'explore' && (
+      {/* Main Split Body */}
+      <div className="flex-1 flex min-h-0 overflow-hidden pb-12 md:pb-0 relative">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+          {activeTab === 'explore' && (
             <ExploreView
               filteredWords={filteredWords}
-              totalWordsCount={bundle.words.length}
+              totalLexiconCount={lexicon.words.length}
+              allWords={lexicon.words}
+              wordsMap={wordsMap}
+              cocaLexemes={lexicon.cocaLexemes || []}
+              families={lexicon.families}
+              cetEntries={lexicon.cetEntries}
               criteria={criteria}
               onChangeCriteria={setCriteria}
-              sortField={sortField}
-              onChangeSortField={setSortField}
+              sortBy={sortBy}
+              onChangeSortBy={setSortBy}
               userRecordsMap={userRecordsMap}
-              allKnownTags={allKnownTags}
-              collections={collections}
-              activeStaticCollectionId={activeStaticCollectionId}
-              onSelectStaticCollectionId={setActiveStaticCollectionId}
+              allAvailableTags={allAvailableTags}
+              staticCollections={staticCollections}
+              selectedStaticCollectionId={selectedStaticCollectionId}
+              onSelectStaticCollectionId={setSelectedStaticCollectionId}
               selectedWordId={selectedWordId}
               onSelectWord={handleSelectWord}
               onInspectFamily={handleInspectFamily}
               onQuickStatusChange={handleStatusChange}
+              onPosStatusChange={handlePosStatusChange}
               onBatchSetStatus={handleBatchSetStatus}
               onBatchAddTag={handleBatchAddTag}
-              onSaveDynamicCollection={(name, description) =>
-                handleCreateCollection({
-                  name,
-                  description,
-                  type: 'dynamic',
-                  wordIds: [],
-                  filterCriteria: criteria,
-                  sortField,
-                })
-              }
-              onExportCurrentWords={(format) =>
-                handleExportWordList(filteredWords, 'LexicalWorkbench_Filtered', format)
+              onAddWordsToStaticCollection={handleAddWordsToStaticCollection}
+              onCreateStaticCollectionFromSelection={handleCreateStaticCollectionFromSelection}
+              onSaveDynamicCollection={handleSaveDynamicCollection}
+              onExportCurrentFiltered={(format, customList) =>
+                handleExportWordList(
+                  customList || filteredWords,
+                  customList ? 'lexical-selected-export' : 'lexical-filtered-export',
+                  format
+                )
               }
               compactDensity={compactDensity}
-              initialScrollOffset={exploreScrollOffset}
-              onScrollOffsetChange={setExploreScrollOffset}
-            />
-          )}
-
-          {activeView === 'families' && (
-            <WordFamilyView
-              families={bundle.families}
-              wordsMap={wordsMap}
-              userRecordsMap={userRecordsMap}
-              dictionaries={dictionaries}
-              selectedFamilyId={selectedFamilyId}
-              highlightedWordId={highlightedFamilyWordId}
-              onSelectFamily={(famId) => {
-                setSelectedFamilyId(famId);
-                setHighlightedFamilyWordId(null);
+              initialScrollOffset={exploreScrollOffsetRef.current}
+              onScrollOffsetChange={(offset) => {
+                exploreScrollOffsetRef.current = offset;
               }}
-              onSelectWord={handleSelectWord}
-              onStatusChange={handleStatusChange}
-              onBatchSetStatus={handleBatchSetStatus}
             />
           )}
 
-          {activeView === 'collections' && (
-            <CollectionsAndPlannerView
+          {activeTab === 'corpus_lab' && (
+            <CorpusLabView
+              words={lexicon.words}
+              wordsMap={wordsMap}
+              cocaLexemes={lexicon.cocaLexemes || []}
+              diagnostics={lexicon.diagnostics}
+              vennSummary={
+                lexicon.diagnostics.venn || {
+                  totalDistinctForms: lexicon.words.length,
+                  cetDistinctForms: 8014,
+                  bncDistinctForms: 76125,
+                  cocaDistinctHeadwords: 53951,
+                  cocaTotalLexemes: 60000,
+                  allThreeCount: 7716,
+                  cetAndBncOnlyCount: 92,
+                  cetAndCocaOnlyCount: 184,
+                  bncAndCocaOnlyCount: 27428,
+                  cetOnlyExactCount: 22,
+                  bncOnlyExactCount: 40889,
+                  cocaOnlyExactCount: 18623,
+                  bncAndCocaIntersection: 35144,
+                  cetAndCocaIntersection: 7900,
+                  cetAndBncIntersection: 7808,
+                  bncHeadwordsInCocaCount: 18774,
+                  cetVariantLinkedToCocaCount: 73,
+                  cetTrulyMissingFromCocaCount: 41,
+                }
+              }
+              families={lexicon.families}
+              userRecordsMap={userRecordsMap}
               collections={collections}
-              words={bundle.words}
-              wordsMap={wordsMap}
-              familiesMap={familiesMap}
-              userRecordsMap={userRecordsMap}
-              onSelectWord={handleSelectWord}
-              onStatusChange={handleStatusChange}
-              onCreateCollection={handleCreateCollection}
-              onDeleteCollection={handleDeleteCollection}
-              onApplyDynamicCollectionToExplore={(crit) => {
-                setActiveStaticCollectionId(null);
-                setCriteria(crit);
-                handleSwitchView('explore');
+              onSelectWord={(w) => handleSelectWord(w, true)}
+              onJumpToExploreWithFilter={(nextCriteria) => {
+                setSelectedStaticCollectionId(null);
+                setCriteria(nextCriteria);
+                setActiveTab('explore');
               }}
-              onBatchSetStatus={handleBatchSetStatus}
+              onCreateCollection={async (col) => {
+                await createOrUpdateCollection(col);
+                await refreshUserStoreData();
+              }}
               onExportWordList={handleExportWordList}
             />
           )}
 
-          {activeView === 'activity' && (
-            <BatchAndActivityView
-              words={bundle.words}
+          {activeTab === 'families' && (
+            <WordFamilyView
+              families={lexicon.families}
               wordsMap={wordsMap}
               userRecordsMap={userRecordsMap}
+              dictionaries={dictionaries}
+              selectedFamilyId={selectedFamilyId}
+              highlightedWordId={familyHighlightWordId}
+              onSelectFamily={(id) => {
+                setSelectedFamilyId(id);
+                setFamilyHighlightWordId(null);
+              }}
+              onSelectWord={(w) => handleSelectWord(w, true)}
+              onStatusChange={handleStatusChange}
+              onBatchSetStatus={handleBatchSetStatus}
+            />
+          )}
+
+          {(activeTab === 'study' || activeTab === 'collections' || activeTab === 'activity') && (
+            <CollectionsAndPlannerView
+              collections={collections}
+              words={lexicon.words}
+              wordsMap={wordsMap}
+              familiesMap={familiesMap}
+              userRecordsMap={userRecordsMap}
               activityLogs={activityLogs}
+              onSelectWord={(w) => handleSelectWord(w, true)}
+              onStatusChange={handleStatusChange}
+              onCreateCollection={async (col) => {
+                await createOrUpdateCollection(col);
+                await refreshUserStoreData();
+              }}
+              onDeleteCollection={async (id) => {
+                await deleteCollection(id);
+                await refreshUserStoreData();
+              }}
+              onApplyDynamicCollectionToExplore={(filterCriteria) => {
+                setSelectedStaticCollectionId(null);
+                setCriteria(filterCriteria);
+                setActiveTab('explore');
+              }}
+              onBatchSetStatus={handleBatchSetStatus}
+              onExportWordList={handleExportWordList}
               onExecuteBatchImport={async (items, options) => {
-                const res = await batchApplyWordUpdates(items, options);
-                await refreshUserDbState();
-                showFeedbackToast(`已成功同步更新 ${res.updatedCount} 条词汇记录`);
+                const res = await batchUpdateWords(items, options);
+                await refreshUserStoreData();
                 return res;
               }}
               onRollbackBatch={async (batchId) => {
-                const count = await rollbackBatchById(batchId);
-                await refreshUserDbState();
-                showFeedbackToast(`已安全回滚批次（恢复 ${count} 条记录）`);
+                const count = await rollbackBatchLogs(batchId);
+                await refreshUserStoreData();
                 return count;
               }}
               onUndoSingleLog={async (logId) => {
                 await undoSingleActivityLog(logId);
-                await refreshUserDbState();
-                showFeedbackToast('已撤销该条变更记录');
+                await refreshUserStoreData();
               }}
-              onSelectWord={handleSelectWord}
               onExportLogsCsv={handleExportLogsCsv}
             />
           )}
 
-          {activeView === 'analytics' && (
+          {(activeTab === 'insights' || activeTab === 'analytics') && (
             <AnalyticsView
-              words={bundle.words}
-              families={bundle.families}
-              cetEntries={bundle.cetEntries}
-              diagnostics={bundle.diagnostics}
+              words={lexicon.words}
+              cocaLexemes={lexicon.cocaLexemes || []}
+              families={lexicon.families}
+              cetEntries={lexicon.cetEntries}
+              diagnostics={lexicon.diagnostics}
               userRecordsMap={userRecordsMap}
               activityLogs={activityLogs}
-              onJumpToExploreWithFilter={(crit) => {
-                setActiveStaticCollectionId(null);
-                setCriteria(crit);
-                handleSwitchView('explore');
+              onJumpToExploreWithFilter={(nextCriteria) => {
+                setSelectedStaticCollectionId(null);
+                setCriteria(nextCriteria);
+                setActiveTab('explore');
               }}
               onInspectFamily={(famId) => handleInspectFamily(famId)}
             />
           )}
 
-          {activeView === 'settings' && (
+          {(activeTab === 'data_studio' || activeTab === 'settings') && (
             <SettingsAndDiagnosticsView
-              diagnostics={bundle.diagnostics}
+              diagnostics={lexicon.diagnostics}
               dictionaries={dictionaries}
               onChangeDictionaries={handleSaveDictionaries}
-              onResetDictionaries={() => {
-                handleSaveDictionaries(DEFAULT_DICTIONARIES);
-                showFeedbackToast('已恢复默认词典配置');
-              }}
-              onExportBackupJson={async () => {
-                const json = await exportFullBackupJson(dictionaries);
-                const dateStr = new Date().toISOString().slice(0, 10);
-                triggerTextFileDownload(
-                  `LexicalWorkbench_Backup_${dateStr}.json`,
-                  json,
-                  'application/json;charset=utf-8'
-                );
-                showFeedbackToast('已导出完整本地 JSON 备份文件');
-              }}
+              onResetDictionaries={() => handleSaveDictionaries(DEFAULT_DICTIONARIES)}
+              onExportBackupJson={handleExportBackupJson}
               onImportBackupJson={async (jsonText, mode) => {
-                const res = await importBackupJson(jsonText, mode);
-                if (res.dictionaries) handleSaveDictionaries(res.dictionaries);
-                await loadLexiconData();
-                await refreshUserDbState();
-                showFeedbackToast(
-                  `已${mode === 'overwrite' ? '完整覆盖恢复' : '按更新时间合并'} ${res.importedWords} 条词汇记录`
-                );
-                return res;
+                const result = await importFullBackupPayload(jsonText, mode);
+                if (result.importedCustomDatasets && result.importedCustomDatasets > 0) {
+                  await loadLexiconData();
+                } else {
+                  await refreshUserStoreData();
+                }
+                return result;
               }}
               onUploadCustomDataset={async (type, fileName, content) => {
-                // 1. Validate format and non-empty parsed entries BEFORE touching IndexedDB
-                const validation = validateCustomDatasetContent(type, content);
-                // 2. Test-build full lexicon in memory against the companion active dataset
-                const nextCet = type === 'cet2016' ? content : rawTextsRef.current.cetText;
-                const nextBnc = type === 'bnc_coca' ? content : rawTextsRef.current.bncText;
-                const built = buildLexiconDatabase(nextCet, nextBnc);
-                if (built.words.length === 0) {
-                  throw new Error('自定义词表解析后总词条数为 0，已取消替换并保留原词库');
-                }
-                // 3. Only persist and swap state after validation + build succeed
-                await db.customDatasets.put({
-                  id: type,
-                  fileName,
-                  content,
-                  updatedAt: new Date().toISOString(),
-                });
-                rawTextsRef.current = { cetText: nextCet, bncText: nextBnc };
+                validateCustomDatasetContent(type, content);
+                const customSets = await getAllCustomDatasets();
+                const currentCet = customSets.find((d) => d.id === 'cet2016')?.content;
+                const currentBnc = customSets.find((d) => d.id === 'bnc_coca')?.content;
+                const currentCoca = customSets.find((d) => d.id === 'coca2020')?.content;
+
+                const baseUrl = import.meta.env.BASE_URL || '/';
+                const nextCet =
+                  type === 'cet2016'
+                    ? content
+                    : currentCet ||
+                      (await fetchTextWithFallback(
+                        `${baseUrl}data/CET2016.txt`,
+                        `${baseUrl}assets/aistudio/CET2016_c8581113.txt`
+                      ));
+                const nextBnc =
+                  type === 'bnc_coca'
+                    ? content
+                    : currentBnc ||
+                      (await fetchTextWithFallback(
+                        `${baseUrl}data/BNC_COCA_lists.txt`,
+                        `${baseUrl}assets/aistudio/BNC_COCA_lists_9ec2b6a0.txt`
+                      ));
+                const nextCoca =
+                  type === 'coca2020'
+                    ? content
+                    : currentCoca ||
+                      (await fetchTextWithFallback(
+                        `${baseUrl}data/coca_freq.json`,
+                        `${baseUrl}assets/aistudio/coca_freq_5e7c1609.json`
+                      ));
+
+                const nextLexicon = buildLexiconDatabase(nextCet, nextBnc, nextCoca);
+                await saveCustomDataset(type, fileName, content);
                 setHasCustomDataset(true);
-                setBundle(built);
-                showFeedbackToast(
-                  `已验证并载入自定义词表 ${fileName}（解析 ${validation.entriesCount.toLocaleString()} 条记录）`
-                );
+                setLexicon(nextLexicon);
+                await refreshUserStoreData();
+
+                return {
+                  wordsCount: nextLexicon.words.length,
+                  familiesCount: nextLexicon.families.length,
+                  cetLinesCount: nextLexicon.cetEntries.length,
+                  cocaRecordsCount: (nextLexicon.cocaLexemes || []).length,
+                };
               }}
               onResetCustomDatasets={async () => {
-                await db.customDatasets.clear();
+                await resetCustomDatasets();
                 await loadLexiconData();
-                showFeedbackToast('已恢复内置词表源文件');
               }}
               hasCustomDataset={hasCustomDataset}
-              onSelectWordByString={handleSelectWordById}
+              onSelectWordByString={handleSelectWordByString}
               wordsMap={wordsMap}
               darkMode={darkMode}
               onToggleDarkMode={() => setDarkMode((d) => !d)}
@@ -1086,25 +965,26 @@ export default function App() {
           )}
         </main>
 
-        {/* Right Word Detail Sheet (Docked on xl+ in Explore, Slide-Over Overlay below xl or in other views) */}
-        {showDetailDrawer && selectedWord && (
+        {/* Right Persistent Research Inspector Sheet */}
+        {isDrawerOpen && selectedWord && (
           <WordDetailDrawer
             word={selectedWord}
-            family={selectedWordFamily}
+            onClose={() => setIsDrawerOpen(false)}
+            wordsMap={wordsMap}
+            familiesMap={familiesMap}
             userRecord={userRecordsMap.get(selectedWord.id)}
             allUserRecordsMap={userRecordsMap}
-            allKnownTags={allKnownTags}
-            wordLogs={selectedWordLogs}
+            collections={collections}
             dictionaries={dictionaries}
-            staticCollections={staticCollections}
-            onClose={() => setShowDetailDrawer(false)}
+            wordLogs={selectedWordLogs}
             onStatusChange={handleStatusChange}
-            onStudyTouch={handleStudyTouch}
-            onSaveTagsAndNotes={handleSaveTagsAndNotes}
-            onSelectWordById={handleSelectWordById}
+            onPosStatusChange={handlePosStatusChange}
+            onTagsChange={handleTagsChange}
+            onNoteChange={handleNoteChange}
+            onTouchStudyRecord={handleTouchStudyRecord}
+            onToggleWordInCollection={handleToggleWordInCollection}
+            onSelectWord={(w) => handleSelectWord(w, true)}
             onInspectFamily={handleInspectFamily}
-            onAddWordToCollection={handleAddWordToStaticCollection}
-            overlayOnDesktop={activeView !== 'explore'}
           />
         )}
       </div>
@@ -1112,39 +992,40 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="移动端底部导航"
-        className="md:hidden h-14 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] grid grid-cols-5 shrink-0 z-30"
+        className="md:hidden fixed bottom-0 inset-x-0 h-12 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] grid grid-cols-6 z-30"
       >
-        {mobileNavItems.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
-          const active = activeView === item.id;
+          const isActive = activeTab === item.id;
           return (
             <button
               key={item.id}
               type="button"
-              onClick={() => handleSwitchView(item.id)}
-              className={`focus-ring flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium cursor-pointer ${
-                active
-                  ? 'text-[var(--accent-primary)] font-semibold'
-                  : 'text-[var(--text-secondary)]'
+              onClick={() => setActiveTab(item.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer ${
+                isActive ? 'text-[var(--accent-primary)] font-semibold' : 'text-[var(--text-muted)]'
               }`}
             >
               <Icon className="w-4 h-4" aria-hidden="true" />
-              <span>{item.shortLabel}</span>
+              <span className="truncate max-w-full px-0.5">{item.shortLabel}</span>
             </button>
           );
         })}
       </nav>
 
-      {/* Global Search Modal (Ctrl+K / /) */}
+      {/* Global Command Search Modal */}
       <GlobalSearchModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        words={bundle.words}
-        familiesCount={bundle.families.length}
+        isOpen={isCommandModalOpen}
+        onClose={() => setIsCommandModalOpen(false)}
+        words={lexicon.words}
+        familiesCount={lexicon.families.length}
+        cocaLexemesCount={(lexicon.cocaLexemes || []).length}
         userRecordsMap={userRecordsMap}
-        onSelectWord={handleSelectWord}
+        onSelectWord={(w) => handleSelectWord(w, true)}
         onInspectFamily={handleInspectFamily}
       />
     </div>
   );
 }
+
+export default App;

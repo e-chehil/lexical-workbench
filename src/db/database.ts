@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import {
+import type {
   ActivityLogEntry,
   DictionaryTemplate,
   LearningStatus,
@@ -9,7 +9,7 @@ import {
 import { DEFAULT_FILTER_CRITERIA } from '../data/searchAndFilter.ts';
 
 export interface CustomDatasetRecord {
-  id: 'cet2016' | 'bnc_coca';
+  id: 'cet2016' | 'bnc_coca' | 'coca2020';
   fileName: string;
   content: string;
   updatedAt: string;
@@ -37,10 +37,29 @@ export const db = new LexicalWorkbenchDB();
 
 const DEFAULT_BUILTIN_COLLECTIONS: WordCollection[] = [
   {
+    id: 'builtin-coca-top5k-cet',
+    name: 'COCA Top 5,000 × CET 核心高频交集',
+    description: '当代美国英语前 5,000 高频词头且属于四六级大纲的高价值核心词汇',
+    type: 'dynamic',
+    entityType: 'headword',
+    wordIds: [],
+    filterCriteria: {
+      ...DEFAULT_FILTER_CRITERIA,
+      sourceFilter: 'both_cet_coca',
+      cocaRankMode: 'derived_headword',
+      minCocaRank: 1,
+      maxCocaRank: 5000,
+    },
+    sortField: 'coca_rank_asc',
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+  },
+  {
     id: 'builtin-cet4-core',
-    name: 'CET-4 核心高频词 (1k–3k)',
+    name: 'CET-4 核心高频词 (BNC 1k–3k)',
     description: '四级大纲与 BNC 1k–3k 交集词汇，英语阅读与写作基石',
     type: 'dynamic',
+    entityType: 'headword',
     wordIds: [],
     filterCriteria: {
       ...DEFAULT_FILTER_CRITERIA,
@@ -54,9 +73,10 @@ const DEFAULT_BUILTIN_COLLECTIONS: WordCollection[] = [
   },
   {
     id: 'builtin-cet6-academic',
-    name: 'CET-6 进阶核心词 (2k–6k)',
+    name: 'CET-6 进阶核心词 (BNC 2k–6k)',
     description: '六级新增高频实词，适合四级通过后集中突破',
     type: 'dynamic',
+    entityType: 'headword',
     wordIds: [],
     filterCriteria: {
       ...DEFAULT_FILTER_CRITERIA,
@@ -70,10 +90,11 @@ const DEFAULT_BUILTIN_COLLECTIONS: WordCollection[] = [
   },
   {
     id: 'builtin-my-Difficult',
-    name: '我的重点难词本',
-    description: '手动归入的易错词、熟词僻义或真题高频词条',
+    name: '我的重点多词性与难词本',
+    description: '手动归入的多词性核心词、熟词僻义或真题高频词条',
     type: 'static',
-    wordIds: ['appropriate', 'accountancy', 'owing to', 'compromise', 'consecutive'],
+    entityType: 'headword',
+    wordIds: ['work', 'like', 'appropriate', 'accountancy', 'owing to', 'climate change'],
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-01T00:00:00.000Z',
   },
@@ -88,8 +109,7 @@ export async function ensureDefaultCollections(): Promise<void> {
 
 /**
  * Pure helper to restore a UserWordRecord to its state prior to a specific ActivityLogEntry.
- * Restores status, tags, notes, studyCount, and lastStudiedAt consistently, while remaining
- * backward-compatible with older log entries that did not store previousStudyCount/previousLastStudiedAt.
+ * Restores status, posStatuses, tags, notes, studyCount, and lastStudiedAt consistently.
  */
 export function applyLogUndoToRecord(
   current: UserWordRecord,
@@ -105,9 +125,18 @@ export function applyLogUndoToRecord(
     updatedAt: now,
   };
 
-  if (log.previousStatus !== undefined) {
+  if (log.actionType === 'pos_status_change' && log.targetPos) {
+    const nextPosMap = { ...(current.posStatuses || {}) };
+    if (!log.previousStatus || log.previousStatus === 'unrated') {
+      delete nextPosMap[log.targetPos];
+    } else {
+      nextPosMap[log.targetPos] = log.previousStatus;
+    }
+    restored.posStatuses = nextPosMap;
+  } else if (log.previousStatus !== undefined) {
     restored.status = log.previousStatus;
   }
+
   if (log.previousTags !== undefined) {
     restored.tags = [...log.previousTags];
   }
@@ -117,7 +146,9 @@ export function applyLogUndoToRecord(
 
   const legacyIncrementedStudy =
     log.actionType === 'study_touch' ||
-    ((log.actionType === 'status_change' || log.actionType === 'batch_import') &&
+    ((log.actionType === 'status_change' ||
+      log.actionType === 'pos_status_change' ||
+      log.actionType === 'batch_import') &&
       log.previousStatus !== log.newStatus &&
       (log.newStatus === 'learning' || log.newStatus === 'mastered'));
 
@@ -138,9 +169,6 @@ export function applyLogUndoToRecord(
 
 /**
  * Pure, explainable merge rule for two UserWordRecord snapshots of the same word.
- * - When both records have valid, distinct `updatedAt` timestamps, the strictly newer record wins
- *   for status (even if the user actively reset status to 'unrated'), tags, notes, studyCount, and lastStudiedAt.
- * - Only when timestamps are identical or missing on either side does it fall back to a conservative union.
  */
 export function mergeUserWordRecordPair(
   existing: UserWordRecord,
@@ -155,11 +183,12 @@ export function mergeUserWordRecordPair(
         : incoming.firstRecordedAt
       : existing.firstRecordedAt || incoming.firstRecordedAt;
 
-  // Distinct timestamps: strictly respect the newer effective operation
   if (existingTs && incomingTs && existingTs !== incomingTs) {
     const winner = incomingTs > existingTs ? incoming : existing;
+    const loser = incomingTs > existingTs ? existing : incoming;
     return {
       ...winner,
+      posStatuses: { ...(loser.posStatuses || {}), ...(winner.posStatuses || {}) },
       tags: [...(winner.tags || [])],
       notes: winner.notes || '',
       firstRecordedAt: earliestFirstRecorded,
@@ -168,7 +197,6 @@ export function mergeUserWordRecordPair(
     };
   }
 
-  // Tie or missing timestamp fallback: conservative union
   const incomingNewerOrEqual = incomingTs >= existingTs;
   const mergedTags = Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])]));
   const mergedNotes = existing.notes
@@ -188,6 +216,7 @@ export function mergeUserWordRecordPair(
   return {
     ...(incomingNewerOrEqual ? incoming : existing),
     status: nextStatus,
+    posStatuses: { ...(existing.posStatuses || {}), ...(incoming.posStatuses || {}) },
     tags: mergedTags,
     notes: mergedNotes,
     firstRecordedAt: earliestFirstRecorded,
@@ -202,8 +231,6 @@ export function mergeUserWordRecordPair(
 
 /**
  * Pure, explainable merge rule for two WordCollection snapshots with the same id.
- * - If `updatedAt` timestamps are distinct and non-empty, the newer snapshot wins (preserving intentional member removals).
- * - Only if timestamps are identical or missing does it union `wordIds`.
  */
 export function mergeWordCollectionPair(
   existingCol: WordCollection,
@@ -234,8 +261,9 @@ export function mergeWordCollectionPair(
 }
 
 /**
- * Updates a single word's learning status and writes an activity log entry.
+ * Updates a single word's overall learning status and writes an activity log entry.
  * Repeating the same status is a no-op and never refreshes lastStudiedAt or studyCount.
+ * Does NOT overwrite or auto-infer posStatuses.
  */
 export async function updateWordStatus(
   wordId: string,
@@ -248,7 +276,6 @@ export async function updateWordStatus(
     const existing = await db.userWords.get(wordId);
     const previousStatus: LearningStatus = existing?.status || 'unrated';
 
-    // Setting the exact same status is a no-op: do not refresh lastStudiedAt or studyCount
     if (existing && previousStatus === newStatus) {
       return existing;
     }
@@ -272,6 +299,7 @@ export async function updateWordStatus(
           wordId,
           word: wordDisplay,
           status: newStatus,
+          posStatuses: {},
           tags: [],
           notes: '',
           firstRecordedAt: now,
@@ -308,8 +336,93 @@ export async function updateWordStatus(
 }
 
 /**
+ * Updates a specific COCA Part-of-Speech (lexeme-level) learning status for a headword.
+ * Strictly keeps overall headword `status` independent (does NOT auto-infer overall status from one PoS).
+ * Switching a PoS status to 'learning' or 'mastered' increments studyCount by 1; repeating same status is a no-op.
+ */
+export async function updateWordPosStatus(
+  wordId: string,
+  wordDisplay: string,
+  pos: string,
+  newPosStatus: LearningStatus,
+  sourceLabel = '词元词性级标注'
+): Promise<UserWordRecord> {
+  const now = new Date().toISOString();
+  return db.transaction('rw', db.userWords, db.activityLogs, async () => {
+    const existing = await db.userWords.get(wordId);
+    const prevPosMap = existing?.posStatuses || {};
+    const previousPosStatus: LearningStatus = prevPosMap[pos] || 'unrated';
+
+    if (existing && previousPosStatus === newPosStatus) {
+      return existing;
+    }
+
+    const nextPosMap: Record<string, LearningStatus> = { ...prevPosMap };
+    if (newPosStatus === 'unrated') {
+      delete nextPosMap[pos];
+    } else {
+      nextPosMap[pos] = newPosStatus;
+    }
+
+    const prevStudyCount = existing?.studyCount || 0;
+    const prevLastStudiedAt = existing?.lastStudiedAt;
+    const studiedNow =
+      previousPosStatus !== newPosStatus &&
+      (newPosStatus === 'learning' || newPosStatus === 'mastered');
+    const nextStudyCount = studiedNow ? prevStudyCount + 1 : prevStudyCount;
+    const nextLastStudiedAt = studiedNow ? now : prevLastStudiedAt;
+
+    const record: UserWordRecord = existing
+      ? {
+          ...existing,
+          posStatuses: nextPosMap,
+          updatedAt: now,
+          studyCount: nextStudyCount,
+          lastStudiedAt: nextLastStudiedAt,
+        }
+      : {
+          wordId,
+          word: wordDisplay,
+          status: 'unrated', // Overall headword status stays unrated until explicitly set!
+          posStatuses: nextPosMap,
+          tags: [],
+          notes: '',
+          firstRecordedAt: now,
+          updatedAt: now,
+          studyCount: nextStudyCount,
+          lastStudiedAt: nextLastStudiedAt,
+        };
+
+    await db.userWords.put(record);
+
+    if (previousPosStatus !== newPosStatus) {
+      await db.activityLogs.add({
+        timestamp: now,
+        wordId,
+        word: wordDisplay,
+        targetPos: pos,
+        actionType: 'pos_status_change',
+        previousStatus: previousPosStatus,
+        newStatus: newPosStatus,
+        previousTags: existing?.tags || [],
+        newTags: record.tags,
+        previousNotes: existing?.notes || '',
+        newNotes: record.notes,
+        previousStudyCount: prevStudyCount,
+        newStudyCount: nextStudyCount,
+        previousLastStudiedAt: prevLastStudiedAt,
+        newLastStudiedAt: nextLastStudiedAt,
+        existedBefore: Boolean(existing),
+        sourceLabel: `${sourceLabel} (${pos})`,
+      });
+    }
+
+    return record;
+  });
+}
+
+/**
  * Explicitly records a study review touch ("记录本次学习") without mutating the word's learning status.
- * Increments studyCount, updates lastStudiedAt, and adds a 'study_touch' activity log entry.
  */
 export async function recordWordStudyTouch(
   wordId: string,
@@ -320,7 +433,6 @@ export async function recordWordStudyTouch(
   return db.transaction('rw', db.userWords, db.activityLogs, async () => {
     const existing = await db.userWords.get(wordId);
     const prevStatus: LearningStatus = existing?.status || 'unrated';
-    // Keep status strictly unchanged when recording a study touch
     const nextStatus: LearningStatus = prevStatus;
     const prevStudyCount = existing?.studyCount || 0;
     const prevLastStudiedAt = existing?.lastStudiedAt;
@@ -338,6 +450,7 @@ export async function recordWordStudyTouch(
           wordId,
           word: wordDisplay,
           status: nextStatus,
+          posStatuses: {},
           tags: [],
           notes: '',
           firstRecordedAt: now,
@@ -398,6 +511,7 @@ export async function updateWordTagsAndNotes(
         wordId,
         word: wordDisplay,
         status: 'unrated',
+        posStatuses: {},
         tags,
         notes,
         firstRecordedAt: now,
@@ -417,6 +531,7 @@ export async function updateWordTagsAndNotes(
           wordId,
           word: wordDisplay,
           status: 'unrated',
+          posStatuses: {},
           tags,
           notes,
           firstRecordedAt: now,
@@ -451,11 +566,6 @@ export async function updateWordTagsAndNotes(
 
 /**
  * Batch applies updates (status, tags, notes) to multiple words and records a shared batchId.
- * CRITICAL:
- * 1. When `item.status` and `options.defaultStatus` are both omitted (e.g. batch adding tags),
- *    `nextStatus` preserves `existing?.status ?? 'unrated'` and NEVER implicitly turns unrated words into `'queued'`.
- * 2. `studyCount` and `lastStudiedAt` are ONLY updated when `nextStatus !== prevStatus` AND `nextStatus` is `'learning'` or `'mastered'`.
- *    Adding tags or notes to an already-mastered word NEVER overwrites its `lastStudiedAt` or increments `studyCount`.
  */
 export async function batchApplyWordUpdates(
   items: {
@@ -468,6 +578,7 @@ export async function batchApplyWordUpdates(
   options: {
     defaultStatus?: LearningStatus;
     commonTags?: string[];
+    preserveExistingStatus?: boolean;
     sourceLabel: string;
     customTimestamp?: string;
   }
@@ -495,9 +606,9 @@ export async function batchApplyWordUpdates(
       const prevStudyCount = existing?.studyCount || 0;
       const prevLastStudiedAt = existing?.lastStudiedAt;
 
-      // Preserve existing status or 'unrated' if no status was specified!
-      const nextStatus: LearningStatus =
-        item.status ?? options.defaultStatus ?? existing?.status ?? 'unrated';
+      const nextStatus: LearningStatus = options.preserveExistingStatus
+        ? item.status ?? existing?.status ?? options.defaultStatus ?? 'unrated'
+        : item.status ?? options.defaultStatus ?? existing?.status ?? 'unrated';
 
       const nextTags = Array.from(
         new Set([...prevTags, ...(options.commonTags || []), ...(item.tagsToAdd || [])])
@@ -541,6 +652,7 @@ export async function batchApplyWordUpdates(
             wordId: item.wordId,
             word: item.word,
             status: nextStatus,
+            posStatuses: {},
             tags: nextTags,
             notes: nextNotes,
             firstRecordedAt: timestamp,
@@ -589,9 +701,6 @@ export async function batchApplyWordUpdates(
 
 /**
  * Safely rolls back a batch operation by batchId.
- * Checks if any affected word has subsequent modifications after this batch.
- * If newer modifications exist, refuses to overwrite newer edits and throws a clear error.
- * Restores status, tags, notes, studyCount, and lastStudiedAt consistently.
  */
 export async function rollbackBatchById(batchId: string): Promise<number> {
   if (!batchId) return 0;
@@ -656,8 +765,6 @@ export async function rollbackBatchById(batchId: string): Promise<number> {
 
 /**
  * Safely undoes a single activity log entry.
- * Refuses to undo if a newer activity log exists for the same wordId,
- * and restores all fields modified by that operation (status, tags, notes, studyCount, lastStudiedAt).
  */
 export async function undoSingleActivityLog(logId: number): Promise<void> {
   const now = new Date().toISOString();
@@ -708,7 +815,7 @@ export async function exportFullBackupJson(
   ]);
 
   const payload: FullBackupPayload = {
-    version: '1.1.0',
+    version: '2.0.0',
     exportedAt: new Date().toISOString(),
     userWords,
     collections,
@@ -722,10 +829,6 @@ export async function exportFullBackupJson(
 
 /**
  * Validates and imports a backup JSON string.
- * Supports:
- * - 'merge' (按更新时间合并): compares updatedAt timestamps so the newer record wins (including active resets to 'unrated' or tag/collection edits),
- *   with conservative fallback only on identical/missing timestamps.
- * - 'overwrite' (完全覆盖): validates structure first, then atomically replaces all tables.
  */
 export async function importBackupJson(
   jsonText: string,
@@ -793,7 +896,6 @@ export async function importBackupJson(
         };
       }
 
-      // Timestamp-aware Merge (按更新时间优先合并，时间戳相同时保守合并)
       let importedWords = 0;
       for (const item of incomingWords) {
         if (!item || !item.wordId) continue;
@@ -825,11 +927,11 @@ export async function importBackupJson(
       if (incomingLogs.length > 0) {
         const existingLogs = await db.activityLogs.toArray();
         const existingSigs = new Set(
-          existingLogs.map((l) => `${l.timestamp}|${l.wordId}|${l.actionType}`)
+          existingLogs.map((l) => `${l.timestamp}|${l.wordId}|${l.actionType}|${l.targetPos || ''}`)
         );
         const newLogs: ActivityLogEntry[] = [];
         for (const log of incomingLogs) {
-          const sig = `${log.timestamp}|${log.wordId}|${log.actionType}`;
+          const sig = `${log.timestamp}|${log.wordId}|${log.actionType}|${log.targetPos || ''}`;
           if (!existingSigs.has(sig)) {
             existingSigs.add(sig);
             const { id: _ignoreId, ...rest } = log;
@@ -859,3 +961,122 @@ export async function importBackupJson(
     }
   );
 }
+
+export async function getAllUserWordRecords(): Promise<UserWordRecord[]> {
+  return db.userWords.toArray();
+}
+
+export async function getRecentActivityLogs(limit = 300): Promise<ActivityLogEntry[]> {
+  return db.activityLogs.orderBy('id').reverse().limit(limit).toArray();
+}
+
+export async function getAllCustomDatasets(): Promise<CustomDatasetRecord[]> {
+  return db.customDatasets.toArray();
+}
+
+export async function saveCustomDataset(
+  id: 'cet2016' | 'bnc_coca' | 'coca2020',
+  fileName: string,
+  content: string
+): Promise<void> {
+  await db.customDatasets.put({
+    id,
+    fileName,
+    content,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function resetCustomDatasets(
+  id?: 'cet2016' | 'bnc_coca' | 'coca2020'
+): Promise<void> {
+  if (id) {
+    await db.customDatasets.delete(id);
+  } else {
+    await db.customDatasets.clear();
+  }
+}
+
+export const touchWordStudyRecord = recordWordStudyTouch;
+export const rollbackBatchLogs = rollbackBatchById;
+export const importFullBackupPayload = importBackupJson;
+export const batchUpdateWords = batchApplyWordUpdates;
+
+export async function createOrUpdateCollection(
+  col: Omit<WordCollection, 'id' | 'createdAt' | 'updatedAt'> & {
+    id?: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }
+): Promise<WordCollection> {
+  const now = new Date().toISOString();
+  const id = col.id || `col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const existing = await db.collections.get(id);
+  const record: WordCollection = {
+    ...col,
+    id,
+    createdAt: existing?.createdAt || col.createdAt || now,
+    updatedAt: now,
+  };
+  await db.collections.put(record);
+  return record;
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  await db.collections.delete(id);
+}
+
+export async function exportFullBackupPayload(
+  dictionaries?: DictionaryTemplate[]
+): Promise<FullBackupPayload> {
+  const [userWords, collections, activityLogs, customDatasets] = await Promise.all([
+    db.userWords.toArray(),
+    db.collections.toArray(),
+    db.activityLogs.toArray(),
+    db.customDatasets.toArray(),
+  ]);
+
+  return {
+    version: '2.0.0',
+    exportedAt: new Date().toISOString(),
+    userWords,
+    collections,
+    activityLogs,
+    dictionaries,
+    customDatasets,
+  };
+}
+
+export async function updateWordTags(
+  wordId: string,
+  wordDisplay: string,
+  tags: string[],
+  sourceLabel = '词条标签编辑'
+): Promise<UserWordRecord> {
+  const existing = await db.userWords.get(wordId);
+  return updateWordTagsAndNotes(
+    wordId,
+    wordDisplay,
+    tags,
+    existing?.notes || '',
+    sourceLabel
+  );
+}
+
+export async function updateWordNote(
+  wordId: string,
+  wordDisplay: string,
+  note: string,
+  sourceLabel = '词条笔记编辑'
+): Promise<UserWordRecord> {
+  const existing = await db.userWords.get(wordId);
+  return updateWordTagsAndNotes(
+    wordId,
+    wordDisplay,
+    existing?.tags || [],
+    note,
+    sourceLabel
+  );
+}
+
+

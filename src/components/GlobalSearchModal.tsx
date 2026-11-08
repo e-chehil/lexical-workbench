@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {
+  COCA_POS_META,
   LEARNING_STATUS_META,
   LexiconWordItem,
   UserWordRecord,
@@ -21,6 +22,7 @@ interface GlobalSearchModalProps {
   onClose: () => void;
   words: LexiconWordItem[];
   familiesCount?: number;
+  cocaLexemesCount?: number;
   userRecordsMap: Map<string, UserWordRecord>;
   onSelectWord: (word: LexiconWordItem) => void;
   onInspectFamily: (familyId: string, highlightWord?: string) => void;
@@ -32,6 +34,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   onClose,
   words,
   familiesCount,
+  cocaLexemesCount,
   userRecordsMap,
   onSelectWord,
   onInspectFamily,
@@ -58,14 +61,16 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   const results = useMemo(() => {
     if (!query.trim()) {
       const sampleIds = [
+        'work',
+        'like',
+        'climate change',
+        'ability',
         'abilities',
-        'appropriate',
-        'owing to',
-        'advisor',
+        'run',
+        'running',
         'color',
-        'baby boom',
-        'accountancy',
-        'abbreviation',
+        'colour',
+        'appropriate',
       ];
       const byId = new Map(words.map((w) => [w.id, w]));
       return sampleIds
@@ -74,7 +79,11 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
         .map((w) => ({
           word: w,
           matchRank: 'exact' as const,
-          matchedContext: w.headword ? `词族 ${w.headword}` : '短语词条',
+          matchedContext: w.inCoca
+            ? `COCA #${w.cocaBestPosRank} (${w.cocaPosCount || 1}性)`
+            : w.headword
+              ? `BNC 词族 ${w.headword}`
+              : '短语词条',
         }));
     }
     return searchLexicon(words, query, { enableFuzzy, limit: 50 });
@@ -128,7 +137,6 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
         className="w-full max-w-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80dvh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Command Input Bar */}
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[var(--border-subtle)]">
           <Search className="w-4 h-4 text-[var(--accent-primary)] shrink-0" aria-hidden="true" />
           <input
@@ -140,7 +148,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             spellCheck={false}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="输入单词、变形 (abilities)、短语 (owing to) 或原表简写 (colo(u)r)…"
+            placeholder="输入单词 (work/like)、屈折形 (abilities)、复合词 (climate change) 或英美变体…"
             className="w-full min-w-0 bg-transparent text-sm sm:text-base text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none"
           />
           <button
@@ -169,13 +177,12 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           )}
         </div>
 
-        {/* Results List */}
         <div className="overflow-y-auto overscroll-contain divide-y divide-[var(--border-subtle)] flex-1">
           {!query.trim() && (
             <div className="px-4 py-1.5 bg-[var(--bg-canvas)] text-[11px] text-[var(--text-muted)] flex items-center justify-between gap-2">
-              <span className="truncate">常用检索示例（支持屈折变形反查词族、同形词辨析与短语）</span>
+              <span className="truncate">三源研究示例词（支持一词多性、屈折变形反查、英美变体与复合词）</span>
               <span className="font-mono-tabular whitespace-nowrap shrink-0">
-                {words.length.toLocaleString()} 词形 · {(familiesCount ?? 25002).toLocaleString()} 词族
+                {words.length.toLocaleString()} 词形 · {(cocaLexemesCount ?? 60000).toLocaleString()} COCA词元 · {(familiesCount ?? 25002).toLocaleString()} 词族
               </span>
             </div>
           )}
@@ -188,7 +195,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 {!enableFuzzy
                   ? '可尝试开启右上角「容错」检索相近拼写。'
-                  : '该词条未收录于 BNC/COCA 25k 或 CET2016 大纲词表。'}
+                  : '该词条未收录于 COCA 2020、BNC/COCA 25k 或 CET2016 大纲词表。'}
               </p>
             </div>
           ) : (
@@ -216,18 +223,26 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                     className="min-w-0 flex-1 text-left flex items-center justify-between gap-3 cursor-pointer focus-ring rounded"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span
                           translate="no"
                           className="font-serif-lexicon font-semibold text-base text-[var(--text-primary)]"
                         >
                           {w.word}
                         </span>
-                        {w.homographNumbers.length > 0 && (
-                          <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                            #{w.homographNumbers.join(',#')}
+                        {w.inCoca && (
+                          <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300 font-semibold">
+                            COCA #{w.cocaBestPosRank}
                           </span>
                         )}
+                        {(w.cocaLexemes || []).slice(0, 3).map((lex) => (
+                          <span
+                            key={lex.lexemeId}
+                            className={`text-[10px] font-mono-tabular px-1.5 py-0.5 rounded ${COCA_POS_META[lex.pos]?.badgeClass || ''}`}
+                          >
+                            {COCA_POS_META[lex.pos]?.shortLabel || lex.pos}
+                          </span>
+                        ))}
                         {w.isCet4 && (
                           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-700 dark:text-teal-300">
                             CET-4
@@ -240,7 +255,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                         )}
                         {w.band && (
                           <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-secondary)]">
-                            {w.band}
+                            BNC {w.band}
                           </span>
                         )}
                         {status !== 'unrated' && (
@@ -252,24 +267,24 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
                       <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)] truncate">
                         <span>{item.matchedContext}</span>
-                        {w.cetRefs.length > 0 && (
-                          <span className="truncate">
-                            · 考纲: {w.cetRefs.map((r) => r.rawMember.replace(/★/g, '')).join(' / ')}
-                          </span>
+                        {w.headword && (
+                          <span>· 词族: {w.headword}</span>
                         )}
                       </div>
                     </div>
 
                     <div className="text-right font-mono-tabular text-xs shrink-0">
                       <div className="text-[var(--text-primary)] font-medium">
-                        {w.formFrequency !== null
-                          ? formatCompactFrequency(w.formFrequency)
-                          : w.bncLinkedViaVariant
-                            ? '无独立频次'
-                            : '未收录'}
+                        {w.cocaHeadwordTotalFreq !== null && w.cocaHeadwordTotalFreq !== undefined
+                          ? `COCA ${formatCompactFrequency(w.cocaHeadwordTotalFreq, true)}`
+                          : w.formFrequency !== null
+                            ? `BNC ${formatCompactFrequency(w.formFrequency, w.inBnc)}`
+                            : '变体/未单列'}
                       </div>
                       <div className="text-[11px] text-[var(--text-muted)]">
-                        族 {w.familyFrequency !== null ? formatCompactFrequency(w.familyFrequency) : '—'}
+                        {w.familyFrequency !== null
+                          ? `BNC族 ${formatCompactFrequency(w.familyFrequency, true)}`
+                          : '无BNC族'}
                       </div>
                     </div>
                   </button>
@@ -282,7 +297,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                         onClose();
                       }}
                       className="px-2 py-1 rounded-md text-xs font-medium border border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--accent-primary)] text-[var(--accent-primary)] inline-flex items-center gap-1 cursor-pointer shrink-0 focus-ring"
-                      title={`在词族视图中定位 “${w.headword}”`}
+                      title={`在词族图谱中定位 “${w.headword}”`}
                     >
                       <Layers className="w-3 h-3" aria-hidden="true" />
                       <span>词族</span>
@@ -294,7 +309,6 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           )}
         </div>
 
-        {/* Minimal Footer Hints */}
         <div className="px-4 py-2 bg-[var(--bg-canvas)] border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-[var(--text-muted)]">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1">

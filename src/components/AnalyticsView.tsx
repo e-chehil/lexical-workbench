@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Info } from 'lucide-react';
 import {
   ActivityLogEntry,
   BncCocaFamily,
   CetOfficialEntry,
+  CocaLexemeRecord,
   DataDiagnosticsReport,
   FilterCriteria,
   LexiconWordItem,
@@ -17,6 +18,7 @@ import {
 
 interface AnalyticsViewProps {
   words: LexiconWordItem[];
+  cocaLexemes: CocaLexemeRecord[];
   families: BncCocaFamily[];
   cetEntries: CetOfficialEntry[];
   diagnostics: DataDiagnosticsReport;
@@ -28,6 +30,7 @@ interface AnalyticsViewProps {
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   words,
+  cocaLexemes,
   families,
   cetEntries,
   userRecordsMap,
@@ -35,21 +38,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   onJumpToExploreWithFilter,
   onInspectFamily,
 }) => {
+  const [rightMatrixTab, setRightMatrixTab] = useState<'coca_tiers' | 'bnc_bands'>('coca_tiers');
+  const [cocaCoverageMode, setCocaCoverageMode] = useState<'headword' | 'explicit_pos'>('headword');
   const [bandViewRange, setBandViewRange] = useState<'all' | '1_10' | '11_25'>('all');
-  const [mobilePane, setMobilePane] = useState<'summary' | 'bands'>('summary');
 
   const stats = useMemo(() => {
-    const core = computeLexiconAnalytics(words, families, cetEntries, userRecordsMap);
-
-    const tagCounts = new Map<string, number>();
-    for (const w of words) {
-      const rec = userRecordsMap.get(w.id);
-      if (rec?.tags) {
-        for (const t of rec.tags) {
-          tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
-        }
-      }
-    }
+    const core = computeLexiconAnalytics(
+      words,
+      families,
+      cetEntries,
+      userRecordsMap,
+      cocaLexemes
+    );
 
     const topUnmasteredFamilies = families
       .filter(
@@ -72,18 +72,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       })
       .filter((x): x is NonNullable<typeof x> => Boolean(x))
       .sort((a, b) => b.unmasteredFreq - a.unmasteredFreq)
-      .slice(0, 10);
-
-    const topTags = Array.from(tagCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12);
+      .slice(0, 8);
 
     return {
       ...core,
       topUnmasteredFamilies,
-      topTags,
     };
-  }, [words, families, cetEntries, userRecordsMap]);
+  }, [words, cocaLexemes, families, cetEntries, userRecordsMap]);
 
   const visibleBandRows = useMemo(() => {
     if (bandViewRange === '1_10') return stats.bandRows.slice(0, 10);
@@ -118,218 +113,200 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
-      {/* Mobile Sub-View Switcher (<1024px) */}
-      <div className="lg:hidden min-h-[40px] py-1.5 px-4 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center gap-1.5 shrink-0">
-        <button
-          type="button"
-          onClick={() => setMobilePane('summary')}
-          className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
-            mobilePane === 'summary'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-              : 'text-[var(--text-muted)]'
-          }`}
-        >
-          核心指标与词族排行
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobilePane('bands')}
-          className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
-            mobilePane === 'bands'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-              : 'text-[var(--text-muted)]'
-          }`}
-        >
-          1k–25k 频段覆盖矩阵
-        </button>
-      </div>
-
-      {/* Zone 1: Left Summary KPIs, Top Families & Activity Trend (340px-400px) */}
-      <aside
-        className={`w-full lg:w-[340px] xl:w-[400px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 lg:flex-initial h-full min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)] ${
-          mobilePane === 'summary' ? 'flex' : 'hidden lg:flex'
-        }`}
-      >
-        {/* 1. 2x2 Core KPI Matrix */}
-        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--border-subtle)] bg-[var(--bg-surface)] shrink-0">
-          <div className="p-3 sm:p-3.5">
-            <div className="flex items-center justify-between gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
-              <span className="truncate">CET-4 掌握率</span>
-              <button
-                type="button"
-                onClick={() =>
-                  onJumpToExploreWithFilter({
-                    ...DEFAULT_FILTER_CRITERIA,
-                    sourceFilter: 'cet4',
-                  })
-                }
-                className="text-[var(--accent-primary)] hover:underline inline-flex items-center gap-0.5 whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <span>筛选</span>
-                <ArrowUpRight className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="mt-1 text-2xl font-mono-tabular font-bold text-[var(--text-primary)]">
-              {stats.cet4FormsTotal > 0
-                ? `${Math.round((stats.cet4FormsMastered / stats.cet4FormsTotal) * 100)}%`
-                : '0%'}
-            </div>
-            <div className="mt-1.5 space-y-0.5 text-[11px] font-mono-tabular text-[var(--text-muted)]">
-              <div className="flex justify-between gap-1">
-                <span>大纲词形</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet4FormsMastered}/{stats.cet4FormsTotal}
-                </span>
-              </div>
-              <div className="flex justify-between gap-1" title="词目中至少 1 个词形已掌握">
-                <span>词目覆盖(≥1)</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet4OfficialPartialCovered}/{stats.cet4OfficialTotal}
-                </span>
-              </div>
-              <div className="flex justify-between gap-1" title="词目下全部词形槽位均已掌握">
-                <span>词目完整掌握</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet4OfficialFullMastered}/{stats.cet4OfficialTotal}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3 sm:p-3.5">
-            <div className="flex items-center justify-between gap-1 text-[11px] font-medium text-[var(--text-secondary)]">
-              <span className="truncate">CET-6 掌握率</span>
-              <button
-                type="button"
-                onClick={() =>
-                  onJumpToExploreWithFilter({
-                    ...DEFAULT_FILTER_CRITERIA,
-                    sourceFilter: 'cet6_new',
-                  })
-                }
-                className="text-[var(--accent-primary)] hover:underline inline-flex items-center gap-0.5 whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <span>筛选</span>
-                <ArrowUpRight className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="mt-1 text-2xl font-mono-tabular font-bold text-[var(--text-primary)]">
-              {stats.cet6OnlyFormsTotal > 0
-                ? `${Math.round((stats.cet6OnlyFormsMastered / stats.cet6OnlyFormsTotal) * 100)}%`
-                : '0%'}
-            </div>
-            <div className="mt-1.5 space-y-0.5 text-[11px] font-mono-tabular text-[var(--text-muted)]">
-              <div className="flex justify-between gap-1" title="仅六级新增词形 (不含四六级同形词)">
-                <span>六级新增词形</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet6OnlyFormsMastered}/{stats.cet6OnlyFormsTotal}
-                </span>
-              </div>
-              <div className="flex justify-between gap-1" title="词目中至少 1 个词形已掌握">
-                <span>词目覆盖(≥1)</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet6OfficialPartialCovered}/{stats.cet6OfficialTotal}
-                </span>
-              </div>
-              <div className="flex justify-between gap-1" title="词目下全部词形槽位均已掌握">
-                <span>词目完整掌握</span>
-                <span className="text-[var(--text-secondary)]">
-                  {stats.cet6OfficialFullMastered}/{stats.cet6OfficialTotal}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3 sm:p-3.5">
-            <div className="text-[11px] font-medium text-[var(--text-secondary)] truncate">
-              语料库词频加权覆盖
-            </div>
-            <div className="mt-1 text-2xl font-mono-tabular font-bold text-emerald-600 dark:text-emerald-400">
-              {stats.corpusWeightedPct}%
-            </div>
-            <div className="mt-1 text-[10px] text-[var(--text-muted)] leading-snug">
-              仅计 BNC/COCA 独立实测词频 (不含变体借用)
-            </div>
-          </div>
-
-          <div className="p-3 sm:p-3.5">
-            <div className="text-[11px] font-medium text-[var(--text-secondary)] truncate">
-              个人学习状态分布
-            </div>
-            <div className="mt-1.5 space-y-1 text-[11px] font-mono-tabular">
-              <div className="flex justify-between gap-1">
-                <span className="text-[var(--text-secondary)]">掌握/在学</span>
-                <span className="font-semibold text-[var(--text-primary)]">
-                  {stats.statusCounts.mastered.toLocaleString()} /{' '}
-                  {stats.statusCounts.learning.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between gap-1">
-                <span className="text-[var(--text-secondary)]">待学/暂缓</span>
-                <span className="font-semibold text-[var(--text-primary)]">
-                  {stats.statusCounts.queued.toLocaleString()} /{' '}
-                  {stats.statusCounts.deferred.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Top 10 High-Value Unmastered Content Families */}
-        <div className="p-3.5 sm:p-4 space-y-2.5 shrink-0">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-              Top 10 高价值待攻克实词族
-            </h3>
-            <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] shrink-0">
-              按未学频次排序
+      {/* Left Pane: 5-Layer Mastery Cards + 3 Frequency-Weighted Coverage Metrics + Activity */}
+      <aside className="w-full lg:w-[390px] xl:w-[440px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-col shrink-0 h-full min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)]">
+        {/* Section 1: 5-Layer Multi-Granularity Mastery Breakdown */}
+        <div className="p-4 space-y-3 bg-[var(--bg-surface)]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
+              五层语言学粒度掌握度核算
+            </h2>
+            <span className="text-[10px] font-mono-tabular text-[var(--text-muted)]">
+              独立核算 · 零跨层虚增
             </span>
           </div>
 
-          <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded bg-[var(--bg-surface)]">
-            {stats.topUnmasteredFamilies.map(({ family, unmasteredCount, unmasteredFreq }, idx) => (
-              <button
-                key={family.id}
-                type="button"
-                onClick={() => onInspectFamily(family.id)}
-                className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-              >
-                <div className="flex items-baseline gap-1.5 min-w-0">
-                  <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-4 shrink-0">
-                    {idx + 1}.
-                  </span>
-                  <span
-                    translate="no"
-                    className="font-serif-lexicon font-semibold text-[var(--text-primary)] truncate"
-                  >
-                    {family.headword}
-                  </span>
-                  <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] shrink-0">
-                    {family.band} · 待学 {unmasteredCount}/{family.members.length}
-                  </span>
-                </div>
-                <span className="font-mono-tabular text-[11px] font-medium text-[var(--accent-primary)] shrink-0">
-                  {unmasteredFreq.toLocaleString()}
+          <div className="grid grid-cols-2 gap-2.5 font-mono-tabular text-xs">
+            {/* Layer 1: Headword Mastery */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
+                1. COCA 词头级掌握 (Headwords)
+              </div>
+              <div className="mt-1 text-lg font-bold text-[var(--text-primary)]">
+                {stats.cocaHeadwordsMastered.toLocaleString()}{' '}
+                <span className="text-xs font-normal text-[var(--text-muted)]">
+                  / {stats.cocaHeadwordsTotal.toLocaleString()}
                 </span>
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                学习中/待学: {stats.cocaHeadwordsLearningOrQueued.toLocaleString()}
+              </div>
+            </div>
+
+            {/* Layer 2: Form Mastery */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
+                2. 词形级掌握 (94,954 Forms)
+              </div>
+              <div className="mt-1 text-lg font-bold text-[var(--text-primary)]">
+                {stats.statusCounts.mastered.toLocaleString()}{' '}
+                <span className="text-xs font-normal text-[var(--text-muted)]">
+                  / {words.length.toLocaleString()}
+                </span>
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                在学 {stats.statusCounts.learning} · 待学 {stats.statusCounts.queued}
+              </div>
+            </div>
+
+            {/* Layer 3: COCA Explicit Lemma+PoS Mastery */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
+                3. COCA 词元+词性显式掌握
+              </div>
+              <div className="mt-1 text-lg font-bold text-blue-600 dark:text-blue-400">
+                {stats.cocaLexemesExplicitMastered.toLocaleString()}{' '}
+                <span className="text-xs font-normal text-[var(--text-muted)]">
+                  / {stats.cocaLexemesTotal.toLocaleString()}
+                </span>
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                显式在学/待学: {stats.cocaLexemesExplicitLearningOrQueued.toLocaleString()}
+              </div>
+            </div>
+
+            {/* Layer 4: BNC 25k Family Mastery */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
+                4. BNC 词族掌握 (25,002 族)
+              </div>
+              <div className="mt-1 text-lg font-bold text-teal-600 dark:text-teal-400">
+                {stats.bncFamiliesPartialMastered.toLocaleString()}{' '}
+                <span className="text-xs font-normal text-[var(--text-muted)]">部分覆盖</span>
+              </div>
+              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                全族完整掌握: {stats.bncFamiliesFullMastered.toLocaleString()} 族
+              </div>
+            </div>
+          </div>
+
+          {/* Layer 5: CET Official Syllabus Entries */}
+          <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono-tabular text-xs space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-sans text-[11px] font-semibold text-[var(--text-secondary)]">
+                5. CET2016 官方考纲词目与词形掌握
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onJumpToExploreWithFilter({
+                    ...DEFAULT_FILTER_CRITERIA,
+                    sourceFilter: 'cet_all',
+                  })
+                }
+                className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+              >
+                <span>筛选考纲</span>
+                <ArrowUpRight className="w-3 h-3" />
               </button>
-            ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <div className="text-[10px] text-[var(--text-muted)]">CET-4 四级大纲</div>
+                <div className="font-bold text-[var(--text-primary)]">
+                  词形 {stats.cet4FormsMastered}/{stats.cet4FormsTotal}
+                </div>
+                <div className="text-[10px] text-[var(--text-secondary)]">
+                  词目覆盖 {stats.cet4OfficialPartialCovered}/{stats.cet4OfficialTotal} (完整{' '}
+                  {stats.cet4OfficialFullMastered})
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-[var(--text-muted)]">★ CET-6 六级新增</div>
+                <div className="font-bold text-[var(--text-primary)]">
+                  词形 {stats.cet6OnlyFormsMastered}/{stats.cet6OnlyFormsTotal}
+                </div>
+                <div className="text-[10px] text-[var(--text-secondary)]">
+                  词目覆盖 {stats.cet6OfficialPartialCovered}/{stats.cet6OfficialTotal} (完整{' '}
+                  {stats.cet6OfficialFullMastered})
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* 3. 14-Day Activity Bar Chart & Tag Breakdown */}
-        <div className="p-3.5 sm:p-4 space-y-3 shrink-0">
+        {/* Section 2: Three Independent Frequency-Weighted Coverage Metrics */}
+        <div className="p-4 space-y-2.5 bg-[var(--bg-surface)]">
           <div className="flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-              近 14 日词汇标注活跃度
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
+              三项独立语料频次加权覆盖率
+            </h3>
+            <span className="text-[10px] text-[var(--text-muted)]">分母与统计口径完全隔离</span>
+          </div>
+
+          <div className="space-y-2">
+            {/* Metric 1: COCA Headword Proxy Weighted */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--text-primary)]">
+                  A. COCA 2020 词头合计频次加权覆盖 (代理指标)
+                </span>
+                <span className="font-mono-tabular text-base font-bold text-blue-600 dark:text-blue-400">
+                  {stats.cocaProxyWeightedPct}%
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] leading-snug">
+                分母：COCA 53,951 个词头合计频次（892,945,569）。说明：当词头整体标为「已掌握」时计入其合计频次，属于词头级代理估计（学习者未必掌握该词所有次要词性）。
+              </p>
+            </div>
+
+            {/* Metric 2: COCA Explicit PoS Weighted */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--text-primary)]">
+                  B. COCA 2020 词元+词性显式加权覆盖 (严格口径)
+                </span>
+                <span className="font-mono-tabular text-base font-bold text-indigo-600 dark:text-indigo-400">
+                  {stats.cocaExplicitWeightedPct}%
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] leading-snug">
+                分母：COCA 60,000 条词元+词性频次（892,945,569）。仅统计用户在详情面板显式标注某词性为「已掌握」的记录，绝不通过词头状态自动虚增。
+              </p>
+            </div>
+
+            {/* Metric 3: BNC Word Form Weighted */}
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--text-primary)]">
+                  C. BNC/COCA 2.0 独立词形实测频次加权覆盖
+                </span>
+                <span className="font-mono-tabular text-base font-bold text-emerald-600 dark:text-emerald-400">
+                  {stats.corpusWeightedPct}%
+                </span>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] leading-snug">
+                分母：BNC 25k 词族表全部 76,125 个去重词形的独立实测频次总和（不含变体借用）。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: Top Unmastered Content Families & 14-Day Activity */}
+        <div className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              高价值待攻克实词族 & 近 14 日标注趋势
             </h3>
             <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
-              累计 {activityLogs.length} 条记录
+              累计 {activityLogs.length} 条流水
             </span>
           </div>
 
-          <div className="h-24 pt-4 px-2 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded flex items-end justify-between gap-1">
+          <div className="h-20 pt-3 px-2 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded flex items-end justify-between gap-1">
             {recent14Days.map((d) => {
-              const hPct = d.count > 0 ? Math.max(12, Math.round((d.count / maxDailyCount) * 100)) : 4;
+              const hPct =
+                d.count > 0 ? Math.max(12, Math.round((d.count / maxDailyCount) * 100)) : 4;
               return (
                 <div
                   key={d.dateStr}
@@ -342,7 +319,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     }`}
                     style={{ height: `${hPct}%` }}
                   />
-                  <span className="text-[9px] font-mono-tabular text-[var(--text-muted)]">
+                  <span className="text-[8px] font-mono-tabular text-[var(--text-muted)]">
                     {d.label.slice(3)}
                   </span>
                 </div>
@@ -350,136 +327,266 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             })}
           </div>
 
-          {stats.topTags.length > 0 && (
-            <div className="pt-2 space-y-1.5">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-                个人高频标签分布
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {stats.topTags.map(([tag, count]) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() =>
-                      onJumpToExploreWithFilter({
-                        ...DEFAULT_FILTER_CRITERIA,
-                        tags: [tag],
-                      })
-                    }
-                    className="px-2 py-0.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-[11px] font-mono-tabular text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
-                  >
-                    #{tag} ({count})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* Zone 2: Right Full-Height 1k–25k BNC/COCA Band Coverage Matrix */}
-      <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
-          mobilePane === 'bands' ? 'flex' : 'hidden lg:flex'
-        }`}
-      >
-        <div className="px-3.5 sm:px-5 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-          <div className="flex items-baseline gap-3">
-            <h2 className="text-xs sm:text-sm font-bold text-[var(--text-primary)] whitespace-nowrap">
-              BNC/COCA 1k–25k 频段覆盖矩阵
-            </h2>
-            <span className="hidden xl:inline text-xs text-[var(--text-muted)]">
-              点击任意频段可直接跳转至词库检索该频段词条
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0">
-            {[
-              { id: 'all', label: '全部 1k–25k' },
-              { id: '1_10', label: '1k–10k' },
-              { id: '11_25', label: '11k–25k' },
-            ].map((tab) => (
+          <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded bg-[var(--bg-surface)]">
+            {stats.topUnmasteredFamilies.map(({ family, unmasteredCount, unmasteredFreq }, idx) => (
               <button
-                key={tab.id}
+                key={family.id}
                 type="button"
-                onClick={() => setBandViewRange(tab.id as typeof bandViewRange)}
-                className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                  bandViewRange === tab.id
-                    ? 'bg-[var(--bg-canvas)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                }`}
+                onClick={() => onInspectFamily(family.id)}
+                className="w-full px-3 py-1.5 flex items-center justify-between gap-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
               >
-                {tab.label}
+                <div className="flex items-baseline gap-1.5 min-w-0">
+                  <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-4">
+                    {idx + 1}.
+                  </span>
+                  <span
+                    translate="no"
+                    className="font-serif-lexicon font-semibold text-[var(--text-primary)] truncate"
+                  >
+                    {family.headword}
+                  </span>
+                  <span className="text-[10px] font-mono-tabular text-[var(--text-muted)]">
+                    {family.band} · 待学 {unmasteredCount}/{family.members.length}
+                  </span>
+                </div>
+                <span className="font-mono-tabular text-[11px] text-[var(--accent-primary)]">
+                  BNC {unmasteredFreq.toLocaleString()}
+                </span>
               </button>
             ))}
           </div>
         </div>
+      </aside>
 
-        {/* Band Table Header */}
-        <div className="grid grid-cols-[52px_66px_78px_1fr_42px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-          <div>频段</div>
-          <div>词族覆盖</div>
-          <div>词形掌握</div>
-          <div className="hidden xl:block">含四六级词</div>
-          <div>掌握与在学进度谱</div>
-          <div className="text-right">掌握率</div>
-        </div>
+      {/* Right Pane: Switchable COCA Rank Interval Coverage & BNC 1k-25k Band Matrix */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setRightMatrixTab('coca_tiers')}
+              className={`px-3 py-1 rounded text-xs font-medium cursor-pointer ${
+                rightMatrixTab === 'coca_tiers'
+                  ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              COCA 2020 排名梯队掌握矩阵 (Top 1k–60k)
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightMatrixTab('bnc_bands')}
+              className={`px-3 py-1 rounded text-xs font-medium cursor-pointer ${
+                rightMatrixTab === 'bnc_bands'
+                  ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              BNC/COCA 1k–25k 词族四态覆盖矩阵
+            </button>
+          </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-          {visibleBandRows.map((row) => {
-            const activePct =
-              row.wordCount > 0
-                ? Math.round((row.learningOrQueuedWords / row.wordCount) * 100)
-                : 0;
-            return (
-              <div
-                key={row.bandNum}
-                onClick={() =>
-                  onJumpToExploreWithFilter({
-                    ...DEFAULT_FILTER_CRITERIA,
-                    bands: [row.bandNum],
-                  })
-                }
-                className="grid grid-cols-[52px_66px_78px_1fr_42px] xl:grid-cols-[64px_92px_104px_82px_1fr_60px] items-center px-3.5 sm:px-5 py-2.5 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+          {rightMatrixTab === 'coca_tiers' ? (
+            <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setCocaCoverageMode('headword')}
+                className={`px-2 py-0.5 rounded cursor-pointer ${
+                  cocaCoverageMode === 'headword'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                    : 'text-[var(--text-secondary)]'
+                }`}
               >
-                <div className="font-mono-tabular font-bold text-[var(--text-primary)] whitespace-nowrap">
-                  BNC {row.bandLabel}
-                </div>
-
-                <div className="font-mono-tabular text-[var(--text-secondary)] whitespace-nowrap">
-                  {row.coveredFamilies} / {row.familyCount}
-                </div>
-
-                <div className="font-mono-tabular text-[var(--text-secondary)] whitespace-nowrap">
-                  {row.masteredWords.toLocaleString()} / {row.wordCount.toLocaleString()}
-                </div>
-
-                <div className="hidden xl:block font-mono-tabular text-[var(--text-muted)] whitespace-nowrap">
-                  {row.cetWordsInBand > 0 ? `${row.cetWordsInBand} 词` : '—'}
-                </div>
-
-                <div className="pr-2 sm:pr-3 flex items-center gap-2">
-                  <div className="flex-1 h-2 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
-                    <div
-                      className="h-full bg-emerald-500 transition-all"
-                      style={{ width: `${row.pctMastered}%` }}
-                      title={`已掌握 ${row.pctMastered}%`}
-                    />
-                    <div
-                      className="h-full bg-[var(--accent-primary)] transition-all"
-                      style={{ width: `${activePct}%` }}
-                      title={`学习中/待学 ${activePct}%`}
-                    />
-                  </div>
-                </div>
-
-                <div className="text-right font-mono-tabular font-semibold text-[var(--text-primary)]">
-                  {row.pctMastered}%
-                </div>
-              </div>
-            );
-          })}
+                去重词头口径 (53,951)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCocaCoverageMode('explicit_pos')}
+                className={`px-2 py-0.5 rounded cursor-pointer ${
+                  cocaCoverageMode === 'explicit_pos'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                    : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                词元+词性记录口径 (60,000)
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              {[
+                { id: 'all', label: '全部 1k–25k' },
+                { id: '1_10', label: '1k–10k' },
+                { id: '11_25', label: '11k–25k' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setBandViewRange(tab.id as typeof bandViewRange)}
+                  className={`px-2 py-0.5 rounded text-xs font-medium cursor-pointer ${
+                    bandViewRange === tab.id
+                      ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
+                      : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
+        {rightMatrixTab === 'coca_tiers' ? (
+          /* ================= COCA RANK INTERVAL COVERAGE MATRIX ================= */
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="px-4 py-2 bg-blue-500/5 border-b border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] flex items-center gap-1.5 shrink-0">
+              <Info className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span>
+                {cocaCoverageMode === 'headword'
+                  ? '当前按「去重词头口径」统计每个 COCA 派生排名区间内各词头的整体掌握率；点击任意区间可直接跳转探索视图。'
+                  : '当前按「词元+词性记录口径」统计每个官方排名区间（60,000 条）的掌握分布与频次加权覆盖率。'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-[150px_110px_100px_1fr_72px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+              <div>COCA 排名区间</div>
+              <div>已掌握 / 总数</div>
+              <div>在学与待学</div>
+              <div>区间掌握与在学进度条</div>
+              <div className="text-right">掌握率</div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+              {(cocaCoverageMode === 'headword'
+                ? stats.cocaHeadwordTierRows
+                : stats.cocaLexemeTierRows
+              ).map((row) => {
+                const total = row.totalCount;
+                const mastered = row.masteredCount;
+                const active = row.learningCount + row.queuedCount;
+                const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
+                const activePct = total > 0 ? Math.round((active / total) * 100) : 0;
+
+                return (
+                  <div
+                    key={row.tierId}
+                    onClick={() =>
+                      onJumpToExploreWithFilter({
+                        ...DEFAULT_FILTER_CRITERIA,
+                        sourceFilter: 'coca_all',
+                        cocaRankMode:
+                          cocaCoverageMode === 'headword' ? 'derived_headword' : 'lemma_pos',
+                        minCocaRank: row.minRank,
+                        maxCocaRank: row.maxRank,
+                      })
+                    }
+                    className="grid grid-cols-[150px_110px_100px_1fr_72px] items-center px-4 py-3 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                  >
+                    <div className="font-bold text-[var(--text-primary)]">{row.tierLabel}</div>
+                    <div className="text-[var(--text-secondary)]">
+                      {mastered.toLocaleString()} / {total.toLocaleString()}
+                    </div>
+                    <div className="text-[var(--text-muted)]">{active.toLocaleString()}</div>
+                    <div className="pr-4 flex items-center gap-2">
+                      <div className="flex-1 h-2.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
+                        <div
+                          className="h-full bg-emerald-500 transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                        <div
+                          className="h-full bg-blue-500 transition-all"
+                          style={{ width: `${activePct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-right font-bold text-[var(--text-primary)]">
+                      {pct}%
+                      <span className="block text-[10px] font-normal text-[var(--text-muted)]">
+                        权 {row.freqCoveragePct}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* ================= BNC 1k-25k 4-STATE BAND MATRIX ================= */
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="grid grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+              <div>频段</div>
+              <div>词族四态 (完/部/触/未)</div>
+              <div>词形掌握</div>
+              <div>COCA/考纲</div>
+              <div>掌握与在学进度谱</div>
+              <div className="text-right">掌握率</div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+              {visibleBandRows.map((row) => {
+                const activePct =
+                  row.wordCount > 0
+                    ? Math.round((row.learningOrQueuedWords / row.wordCount) * 100)
+                    : 0;
+                const untouchedFamilies = Math.max(0, row.familyCount - row.touchedFamilies);
+                return (
+                  <div
+                    key={row.bandNum}
+                    onClick={() =>
+                      onJumpToExploreWithFilter({
+                        ...DEFAULT_FILTER_CRITERIA,
+                        bands: [row.bandNum],
+                      })
+                    }
+                    className="grid grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 py-2.5 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                  >
+                    <div className="font-bold text-[var(--text-primary)]">
+                      BNC {row.bandLabel}
+                    </div>
+
+                    <div
+                      className="text-[11px] text-[var(--text-secondary)]"
+                      title={`完整掌握: ${row.fullMasteredFamilies} | 部分掌握: ${row.partialMasteredFamilies} | 已接触(在学/待学): ${row.touchedFamilies} | 未接触: ${untouchedFamilies}`}
+                    >
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                        {row.fullMasteredFamilies}
+                      </span>
+                      /<span>{row.partialMasteredFamilies}</span>/
+                      <span className="text-blue-600 dark:text-blue-400">
+                        {row.touchedFamilies}
+                      </span>
+                      /<span className="text-[var(--text-muted)]">{untouchedFamilies}</span>
+                    </div>
+
+                    <div className="text-[var(--text-secondary)]">
+                      {row.masteredWords.toLocaleString()} / {row.wordCount.toLocaleString()}
+                    </div>
+
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      C:{row.cocaWordsInBand} · E:{row.cetWordsInBand}
+                    </div>
+
+                    <div className="pr-3 flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
+                        <div
+                          className="h-full bg-emerald-500 transition-all"
+                          style={{ width: `${row.pctMastered}%` }}
+                        />
+                        <div
+                          className="h-full bg-[var(--accent-primary)] transition-all"
+                          style={{ width: `${activePct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-right font-semibold text-[var(--text-primary)]">
+                      {row.pctMastered}%
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

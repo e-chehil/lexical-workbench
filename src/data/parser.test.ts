@@ -11,13 +11,17 @@ import {
 } from './parser.ts';
 import {
   buildDictionaryUrl,
+  compareCorpusWordSets,
   computeLexiconAnalytics,
+  computeMultiObjectiveStudyCandidates,
   computeStudyPriorityScore,
   DEFAULT_FILTER_CRITERIA,
   escapeCsvField,
+  filterAndSortCocaLexemes,
   filterAndSortWords,
   parseBatchInputText,
   parseCsvLine,
+  resolvePresetWordSet,
   searchLexicon,
   selectFamilyCetWordIdsForQueue,
   splitCsvRecords,
@@ -31,7 +35,7 @@ import {
   formatFamilyRoleAndShare,
   getIntraFamilyShareDetail,
 } from '../utils/frequency.ts';
-import { ActivityLogEntry, UserWordRecord, WordCollection } from './types.ts';
+import type { ActivityLogEntry, UserWordRecord, WordCollection } from './types.ts';
 
 test('CET2016 token expansion handles all required edge cases accurately', () => {
   // 1. a/an parallel slash
@@ -669,4 +673,277 @@ test('Intra-family share helper strictly distinguishes null, explicit 0%, <1% no
   assert.equal(nullShare.exactPct, 0);
   assert.equal(formatFamilyRoleAndShare(false, 3, null, 1682, false, true), '关联词族 · 族3词');
 });
+
+test('Lexical Workbench 2.0: Full 3-source integration (CET2016 + BNC 25k + COCA 2020) and 12 mandatory linguistic cases', () => {
+  const cetPath = path.resolve(process.cwd(), 'public/data/CET2016.txt');
+  const bncPath = path.resolve(process.cwd(), 'public/data/BNC_COCA_lists.txt');
+  const cocaPath = path.resolve(process.cwd(), 'public/data/coca_freq.json');
+
+  const cetRaw = fs.readFileSync(cetPath, 'utf8');
+  const bncRaw = fs.readFileSync(bncPath, 'utf8');
+  const cocaRaw = fs.readFileSync(cocaPath, 'utf8');
+
+  const bundle = buildLexiconDatabase(cetRaw, bncRaw, cocaRaw);
+  const diag = bundle.diagnostics;
+
+  // 1. Verify COCA 2020 exact baseline metrics
+  assert.equal(diag.cocaHeadwordCount, 53951);
+  assert.equal(diag.cocaLexemeRecordCount, 60000);
+  assert.equal(diag.cocaTotalTokenFrequency, 892945569);
+  assert.equal(diag.cocaRankMin, 1);
+  assert.equal(diag.cocaRankMax, 60000);
+  assert.equal(diag.cocaHasCompleteRankRange, true);
+  assert.equal(diag.cocaHyphenatedHeadwordCount, 9811);
+  assert.equal(diag.cocaMultiPosHeadwordCount, 5627);
+  assert.equal(diag.cocaMultiWordHeadwordCount, 1);
+  assert.equal(diag.cocaCapitalizedHeadwordCount, 6);
+
+  // 2. Verify 3-source Venn diagram exact numbers
+  assert.ok(diag.venn);
+  assert.equal(diag.venn.totalDistinctForms, 94954);
+  assert.equal(diag.venn.cetDistinctForms, 8014);
+  assert.equal(diag.venn.bncDistinctForms, 76125);
+  assert.equal(diag.venn.cocaDistinctHeadwords, 53951);
+  assert.equal(diag.venn.cocaTotalLexemes, 60000);
+  assert.equal(diag.venn.allThreeCount, 7716);
+  assert.equal(diag.venn.bncAndCocaIntersection, 35144);
+  assert.equal(diag.venn.cetAndCocaIntersection, 7900);
+  assert.equal(diag.venn.cocaOnlyExactCount, 18623);
+  assert.equal(diag.venn.cetVariantLinkedToCocaCount, 73);
+  assert.equal(diag.venn.cetTrulyMissingFromCocaCount, 41);
+
+  const byId = new Map(bundle.words.map((w) => [w.id, w]));
+
+  // Case 1: "work" — COCA verb (#115, 854,095) and noun (#207, 456,169) stored separately
+  const work = byId.get('work')!;
+  assert.equal(work.inCoca, true);
+  assert.equal(work.cocaPosCount, 2);
+  assert.equal(work.cocaHeadwordTotalFreq, 854095 + 456169);
+  assert.equal(work.cocaLexemes?.[0].pos, 'verb');
+  assert.equal(work.cocaLexemes?.[0].rank, 115);
+  assert.equal(work.cocaLexemes?.[0].frequency, 854095);
+  assert.equal(work.cocaLexemes?.[1].pos, 'noun');
+  assert.equal(work.cocaLexemes?.[1].rank, 207);
+  assert.equal(work.cocaLexemes?.[1].frequency, 456169);
+
+  // Case 2: "like" — all 6 PoS records preserved intact
+  const like = byId.get('like')!;
+  assert.equal(like.inCoca, true);
+  assert.equal(like.cocaPosCount, 6);
+  assert.deepEqual(
+    like.cocaLexemes?.map((l) => l.pos),
+    ['preposition', 'verb', 'conjunction', 'adjective', 'adverb', 'noun']
+  );
+
+  // Case 3 & 4: "ability" vs "abilities" — BNC form frequency vs COCA noun lemma frequency never mixed or borrowed
+  const ability = byId.get('ability')!;
+  assert.equal(ability.inBnc, true);
+  assert.equal(ability.formFrequency, 9113); // BNC form freq
+  assert.equal(ability.inCoca, true);
+  assert.equal(ability.cocaHeadwordTotalFreq, 122943); // COCA noun lemma freq
+  assert.equal(ability.cocaBestPosRank, 789);
+
+  const abilities = byId.get('abilities')!;
+  assert.equal(abilities.inBnc, true);
+  assert.equal(abilities.formFrequency, 1334);
+  assert.equal(abilities.inCoca, false);
+  assert.equal(abilities.cocaHeadwordTotalFreq, null);
+  assert.equal(abilities.cocaLexemes?.length, 0);
+
+  // Case 5: "go" vs "went" — no fabricated COCA form frequency on "went"
+  const go = byId.get('go')!;
+  assert.equal(go.inCoca, true);
+  assert.equal(go.cocaBestPosRank, 31);
+  const went = byId.get('went')!;
+  assert.equal(went.inBnc, true);
+  assert.equal(went.inCoca, false);
+  assert.equal(went.cocaHeadwordTotalFreq, null);
+
+  // Case 6: "running" — independent COCA adjective (#3262) and noun (#4456) NOT merged into "run"
+  const running = byId.get('running')!;
+  assert.equal(running.inCoca, true);
+  assert.equal(running.cocaPosCount, 2);
+  assert.deepEqual(
+    running.cocaLexemes?.map((l) => l.pos),
+    ['adjective', 'noun']
+  );
+  const run = byId.get('run')!;
+  assert.equal(run.inCoca, true);
+  assert.ok(!run.cocaLexemes?.some((l) => l.rank === 3262 || l.rank === 4456));
+
+  // Case 7: "grannies" — retains multiple BNC family memberships
+  const grannies = byId.get('grannies')!;
+  assert.equal(grannies.bncMemberships?.length, 2);
+
+  // Case 8 & 9: "ably" / "abler" (<1% family share) and explicit 0-frequency BNC forms (not null)
+  const ably = byId.get('ably')!;
+  assert.equal(ably.formFrequency, 100);
+  assert.equal(getIntraFamilyShareDetail(ably.formFrequency, ably.familyFrequency).label, '<1%');
+  assert.equal(ably.inCoca, true);
+  assert.equal(ably.cocaBestPosRank, 24706);
+
+  const abler = byId.get('abler')!;
+  assert.equal(abler.formFrequency, 5);
+  assert.equal(getIntraFamilyShareDetail(abler.formFrequency, abler.familyFrequency).label, '<1%');
+  assert.equal(abler.inCoca, false);
+
+  const zeroFreqMember = byId.get('adaptabilities')!;
+  assert.equal(zeroFreqMember.inBnc, true);
+  assert.equal(zeroFreqMember.formFrequency, 0);
+  assert.equal(
+    getIntraFamilyShareDetail(zeroFreqMember.formFrequency, zeroFreqMember.familyFrequency).label,
+    '0%'
+  );
+  assert.equal(zeroFreqMember.inCoca, false);
+
+  // Case 10: "climate change" — multi-word COCA headword searchable & preserved
+  const climateChange = byId.get('climate change')!;
+  assert.ok(climateChange);
+  assert.equal(climateChange.isPhrase, true);
+  assert.equal(climateChange.inCoca, true);
+  assert.equal(climateChange.cocaBestPosRank, 29067);
+  assert.equal(climateChange.cocaHeadwordTotalFreq, 403);
+
+  // Case 11: "R&D", "n't", "and/or" — special orthography preserved
+  const rnd = byId.get('r&d')!;
+  assert.ok(rnd);
+  assert.equal(rnd.word, 'R&D');
+  assert.equal(rnd.inCoca, true);
+  assert.equal(rnd.cocaBestPosRank, 24379);
+
+  const nt = byId.get("n't")!;
+  assert.ok(nt);
+  assert.equal(nt.inCoca, true);
+  assert.equal(nt.cocaPrimaryPos, 'negation');
+  assert.equal(nt.cocaBestPosRank, 20);
+
+  const andOr = byId.get('and/or')!;
+  assert.ok(andOr);
+  assert.equal(andOr.inCoca, true);
+  assert.equal(andOr.cocaPrimaryPos, 'conjunction');
+
+  // Case 12: "TRUE" and "FALSE" — original capitalization retained in displayVariants
+  const trueWord = byId.get('true')!;
+  assert.equal(trueWord.hasCapitalVariant, true);
+  assert.ok(trueWord.displayVariants.includes('TRUE'));
+  const falseWord = byId.get('false')!;
+  assert.equal(falseWord.hasCapitalVariant, true);
+  assert.ok(falseWord.displayVariants.includes('FALSE'));
+});
+
+test('Lexical Workbench 2.0: CorpusObservations, LexicalRelations, Top-5k Dual Modes, Multi-Objective Planner, and PoS Mastery Non-Inference', () => {
+  const cetRaw = fs.readFileSync(path.resolve(process.cwd(), 'public/data/CET2016.txt'), 'utf8');
+  const bncRaw = fs.readFileSync(
+    path.resolve(process.cwd(), 'public/data/BNC_COCA_lists.txt'),
+    'utf8'
+  );
+  const cocaRaw = fs.readFileSync(
+    path.resolve(process.cwd(), 'public/data/coca_freq.json'),
+    'utf8'
+  );
+
+  const bundle = buildLexiconDatabase(cetRaw, bncRaw, cocaRaw);
+  const wordsMap = new Map(bundle.words.map((w) => [w.id, w]));
+  const familiesMap = new Map(bundle.families.map((f) => [f.id, f]));
+
+  // 1. Verify "COCA Top 5,000" strictly distinguishes 5,000 lemma+PoS records vs 5,000 derived headwords
+  const top5kLexemes = bundle.cocaLexemes!.filter((l) => l.rank <= 5000);
+  assert.equal(top5kLexemes.length, 5000);
+
+  const top5kHeadwords = filterAndSortWords(
+    bundle.words,
+    new Map(),
+    {
+      ...DEFAULT_FILTER_CRITERIA,
+      sourceFilter: 'coca_all',
+      cocaRankMode: 'derived_headword',
+      minCocaRank: 1,
+      maxCocaRank: 5000,
+    },
+    'coca_rank_asc'
+  );
+  // Competition ranking around 5000 yields ~5000 distinct headwords (far more than the ~4,365 unique headwords inside the top 5,000 lemma+PoS rows!)
+  const uniqueHeadwordsInTop5kLexemes = new Set(top5kLexemes.map((l) => l.normalizedHeadword)).size;
+  assert.ok(uniqueHeadwordsInTop5kLexemes < 5000);
+  assert.ok(top5kHeadwords.length >= 5000 && top5kHeadwords.length <= 5005);
+
+  // 2. Verify PoS-level mastery does NOT automatically infer whole-headword mastery in Analytics
+  const userRecords = new Map<string, UserWordRecord>([
+    [
+      'work',
+      {
+        wordId: 'work',
+        word: 'work',
+        status: 'learning', // Overall headword is still "learning"
+        posStatuses: {
+          noun: 'mastered', // Only noun is mastered; verb is still learning
+          verb: 'learning',
+        },
+        tags: ['高频多词性'],
+        notes: 'work 作名词已掌握，动词搭配待巩固',
+        firstRecordedAt: '2026-03-01T00:00:00.000Z',
+        updatedAt: '2026-03-02T00:00:00.000Z',
+        studyCount: 2,
+      },
+    ],
+  ]);
+
+  const analytics = computeLexiconAnalytics(
+    bundle.words,
+    bundle.families,
+    bundle.cetEntries,
+    userRecords,
+    bundle.cocaLexemes
+  );
+
+  // Overall headword "work" is in 'learning', NOT 'mastered'
+  assert.equal(analytics.cocaHeadwordsMastered, 0);
+  assert.equal(analytics.cocaHeadwordsLearningOrQueued, 1);
+  // Explicit PoS mastery counts "work (noun)" (freq 456,169) as mastered, NOT "work (verb)" (freq 854,095)
+  assert.equal(analytics.cocaLexemesExplicitMastered, 1);
+  assert.equal(analytics.cocaExplicitMasteredFreq, 456169);
+
+  // 3. Verify undo of pos_status_change restores posStatuses without corrupting overall headword status
+  const posLog: ActivityLogEntry = {
+    id: 501,
+    timestamp: '2026-03-02T00:00:00.000Z',
+    wordId: 'work',
+    word: 'work',
+    targetPos: 'noun',
+    actionType: 'pos_status_change',
+    previousStatus: 'unrated',
+    newStatus: 'mastered',
+    previousStudyCount: 1,
+    newStudyCount: 2,
+    existedBefore: true,
+  };
+  const undoneWork = applyLogUndoToRecord(
+    userRecords.get('work')!,
+    posLog,
+    '2026-03-03T00:00:00.000Z'
+  );
+  assert.ok(undoneWork);
+  assert.equal(undoneWork.status, 'learning');
+  assert.equal(undoneWork.posStatuses?.noun, undefined);
+  assert.equal(undoneWork.posStatuses?.verb, 'learning');
+  assert.equal(undoneWork.studyCount, 1);
+
+  // 4. Verify Multi-Objective Study Planner returns explainable dimensions and Pareto frontier flags
+  const candidates = computeMultiObjectiveStudyCandidates(
+    bundle.words,
+    familiesMap,
+    userRecords,
+    {
+      strategy: 'custom_multi_objective',
+      customWeights: { cocaWeight: 40, bncWeight: 25, cetWeight: 25, gapWeight: 10 },
+      maxCandidatesPool: 50,
+    }
+  );
+  assert.equal(candidates.length, 50);
+  assert.ok(candidates.some((c) => c.isParetoOptimal));
+  assert.ok(candidates[0].explainableReasons.length > 0);
+  assert.ok(candidates[0].dimensions.cocaValue >= 0 && candidates[0].dimensions.cocaValue <= 100);
+});
+
+
 

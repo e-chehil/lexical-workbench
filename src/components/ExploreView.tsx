@@ -1,827 +1,838 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Search,
   SlidersHorizontal,
-  X,
+  Download,
+  BookmarkPlus,
   CheckSquare,
   Square,
-  Download,
+  X,
   RotateCcw,
-  ListChecks,
-  MoreHorizontal,
+  Layers,
+  Tag,
+  Columns,
+  Sparkles,
 } from 'lucide-react';
 import {
+  BncCocaFamily,
+  CetOfficialEntry,
+  COCA_POS_META,
+  CocaLexemeRecord,
+  CocaRawPos,
+  ExploreEntityViewMode,
   FilterCriteria,
   LEARNING_STATUS_META,
   LearningStatus,
   LexiconWordItem,
-  SortField,
+  SortOption,
+  SourceFilterOption,
   UserWordRecord,
   WordCollection,
 } from '../data/types.ts';
-import { DEFAULT_FILTER_CRITERIA } from '../data/searchAndFilter.ts';
 import {
-  formatCompactFrequency,
-  formatFamilyRoleAndShare,
-  getIntraFamilySharePct,
-} from '../utils/frequency.ts';
+  DEFAULT_FILTER_CRITERIA,
+  filterAndSortCocaLexemes,
+} from '../data/searchAndFilter.ts';
+import { formatCompactFrequency } from '../utils/frequency.ts';
 
 interface ExploreViewProps {
   filteredWords: LexiconWordItem[];
-  totalWordsCount: number;
+  totalLexiconCount: number;
+  allWords: LexiconWordItem[];
+  wordsMap: Map<string, LexiconWordItem>;
+  cocaLexemes: CocaLexemeRecord[];
+  families: BncCocaFamily[];
+  cetEntries: CetOfficialEntry[];
   criteria: FilterCriteria;
-  onChangeCriteria: (next: FilterCriteria) => void;
-  sortField: SortField;
-  onChangeSortField: (next: SortField) => void;
+  onChangeCriteria: React.Dispatch<React.SetStateAction<FilterCriteria>>;
+  sortBy: SortOption;
+  onChangeSortBy: (sort: SortOption) => void;
   userRecordsMap: Map<string, UserWordRecord>;
-  allKnownTags: string[];
-  collections: WordCollection[];
-  activeStaticCollectionId: string | null;
+  allAvailableTags: string[];
+  staticCollections: WordCollection[];
+  selectedStaticCollectionId: string | null;
   onSelectStaticCollectionId: (id: string | null) => void;
   selectedWordId: string | null;
   onSelectWord: (word: LexiconWordItem, openDrawer?: boolean) => void;
-  onInspectFamily: (familyId: string, highlightWordId?: string) => void;
+  onInspectFamily: (familyId: string, highlightWord?: string) => void;
   onQuickStatusChange: (wordId: string, wordDisplay: string, status: LearningStatus) => void;
-  onBatchSetStatus: (wordIds: string[], status: LearningStatus) => void;
+  onPosStatusChange?: (
+    wordId: string,
+    wordDisplay: string,
+    pos: CocaRawPos,
+    status: LearningStatus
+  ) => void;
+  onBatchSetStatus: (wordIds: string[], status: LearningStatus, label?: string) => void;
   onBatchAddTag: (wordIds: string[], tag: string) => void;
+  onAddWordsToStaticCollection: (collectionId: string, wordIds: string[]) => void;
+  onCreateStaticCollectionFromSelection?: (name: string, wordIds: string[]) => Promise<void>;
   onSaveDynamicCollection: (name: string, description: string) => void;
-  onExportCurrentWords?: (format: 'txt' | 'csv') => void;
+  onExportCurrentFiltered: (format: 'csv' | 'txt', customList?: LexiconWordItem[]) => void;
   compactDensity?: boolean;
   initialScrollOffset?: number;
   onScrollOffsetChange?: (offset: number) => void;
 }
 
-const SOURCE_SCOPES: { id: FilterCriteria['sourceFilter']; label: string; shortLabel: string }[] = [
-  { id: 'all', label: '全部词库', shortLabel: '全部' },
-  { id: 'cet_all', label: '四六级全集', shortLabel: '四六级' },
-  { id: 'cet4', label: 'CET-4 大纲', shortLabel: 'CET-4' },
-  { id: 'cet6', label: 'CET-6 大纲 (含共词)', shortLabel: 'CET-6全' },
-  { id: 'cet6_new', label: 'CET-6 新增 (★独有)', shortLabel: 'CET-6★' },
-  { id: 'both_cet_bnc', label: '大纲 ∩ BNC', shortLabel: '大纲∩BNC' },
-  { id: 'cet_only', label: '仅大纲词', shortLabel: '仅大纲' },
-  { id: 'bnc_all', label: 'BNC 25k', shortLabel: 'BNC 25k' },
-];
-
-const BAND_RANGES: { label: string; min: number | null; max: number | null }[] = [
-  { label: '全频段', min: null, max: null },
-  { label: '1k–3k', min: 1, max: 3 },
-  { label: '4k–6k', min: 4, max: 6 },
-  { label: '7k–10k', min: 7, max: 10 },
-  { label: '11k–15k', min: 11, max: 15 },
-  { label: '16k–25k', min: 16, max: 25 },
-];
-
 const ALL_STATUSES: LearningStatus[] = ['unrated', 'queued', 'learning', 'mastered', 'deferred'];
+
+const MAJOR_COCA_POS: CocaRawPos[] = [
+  'noun',
+  'adjective',
+  'verb',
+  'adverb',
+  'preposition',
+  'conjunction',
+  'pronoun',
+  'determiner',
+  'number',
+  'interjection',
+  'article',
+];
+
+const SOURCE_FILTER_LABELS: { value: SourceFilterOption; label: string; group: string }[] = [
+  { value: 'all', label: '全部词库 (94,954 词形)', group: '基础' },
+  { value: 'all_three_sources', label: '三源交集 CET ∩ BNC ∩ COCA (7,716)', group: '跨源交集' },
+  { value: 'both_bnc_coca', label: 'BNC ∩ COCA 双语料交集 (35,144)', group: '跨源交集' },
+  { value: 'both_cet_coca', label: 'CET ∩ COCA 考纲当代交集 (7,900)', group: '跨源交集' },
+  { value: 'both_cet_bnc', label: 'CET ∩ BNC 考纲词族交集 (7,808)', group: '跨源交集' },
+  { value: 'coca_all', label: 'COCA 2020 全部收录 (含变体)', group: '单源与差集' },
+  { value: 'coca_only', label: '仅 COCA 2020 独有 (18,623)', group: '单源与差集' },
+  { value: 'bnc_only', label: '仅 BNC/COCA 25k 独有 (40,889)', group: '单源与差集' },
+  { value: 'cet_not_in_coca', label: 'CET 考纲未进 COCA 60k (含英式/派生)', group: '单源与差集' },
+  { value: 'cet_only', label: 'CET 考纲未进 BNC 25k', group: '单源与差集' },
+  { value: 'cet_all', label: 'CET-4 / CET-6 全部考纲词 (8,014)', group: '四六级考纲' },
+  { value: 'cet4', label: 'CET-4 四级大纲词', group: '四六级考纲' },
+  { value: 'cet6', label: 'CET-6 六级全部词', group: '四六级考纲' },
+  { value: 'cet6_new', label: '★ CET-6 六级新增词', group: '四六级考纲' },
+  { value: 'bnc_all', label: 'BNC/COCA 1k–25k 全部词形 (76,125)', group: 'BNC 词族' },
+];
 
 export const ExploreView: React.FC<ExploreViewProps> = ({
   filteredWords,
-  totalWordsCount,
+  totalLexiconCount,
+  wordsMap,
+  cocaLexemes,
+  families,
+  cetEntries,
   criteria,
   onChangeCriteria,
-  sortField,
-  onChangeSortField,
+  sortBy,
+  onChangeSortBy,
   userRecordsMap,
-  collections,
-  activeStaticCollectionId,
+  allAvailableTags,
+  staticCollections,
+  selectedStaticCollectionId,
   onSelectStaticCollectionId,
   selectedWordId,
   onSelectWord,
   onInspectFamily,
   onQuickStatusChange,
+  onPosStatusChange,
   onBatchSetStatus,
   onBatchAddTag,
   onSaveDynamicCollection,
-  onExportCurrentWords,
-  compactDensity = true,
+  onExportCurrentFiltered,
+  compactDensity = false,
   initialScrollOffset = 0,
   onScrollOffsetChange,
 }) => {
-  const [showAdvancedDrawer, setShowAdvancedDrawer] = useState(false);
+  const [entityMode, setEntityMode] = useState<ExploreEntityViewMode>('forms');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const [visibleCols, setVisibleCols] = useState({
+    cocaRank: true,
+    cocaPos: true,
+    bncFamily: true,
+    bncFormFreq: true,
+    cetLevel: true,
+  });
+
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
-  const [isSelectMode, setIsSelectMode] = useState(false);
   const [batchTagInput, setBatchTagInput] = useState('');
-  const [showBatchMoreMenu, setShowBatchMoreMenu] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newCollectionDesc, setNewCollectionDesc] = useState('');
-  const [showExportMenu, setShowExportMenu] = useState(false);
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const parentRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1280
-  );
+  const [containerWidth, setContainerWidth] = useState<number>(1024);
 
-  // Measure actual table container width via ResizeObserver so columns adapt to available space
   useEffect(() => {
-    const el = parentRef.current;
+    const el = rootRef.current;
     if (!el) return;
     const updateWidth = () => {
-      if (el.clientWidth > 0) {
-        setContainerWidth(el.clientWidth);
-      }
+      if (el.clientWidth > 0) setContainerWidth(el.clientWidth);
     };
     updateWidth();
     if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(updateWidth);
-      observer.observe(el);
-      return () => observer.disconnect();
-    } else {
-      window.addEventListener('resize', updateWidth);
-      return () => window.removeEventListener('resize', updateWidth);
+      const obs = new ResizeObserver(updateWidth);
+      obs.observe(el);
+      return () => obs.disconnect();
     }
   }, []);
 
-  const isCompactCardLayout = containerWidth < 560;
-  const isWideTableLayout = containerWidth >= 760;
+  const isCompactCardLayout = containerWidth < 680;
 
-  // Anchor index for Shift+Click & Shift+Arrow range selection
-  const lastAnchorIndexRef = useRef<number | null>(null);
+  // Derived entity lists depending on entityMode
+  const headwordEntities = useMemo(() => {
+    return filteredWords.filter((w) => w.inCoca || w.isHeadword || w.inCet);
+  }, [filteredWords]);
 
-  // Drag-to-select state (paint selection across checkbox column)
-  const dragSelectStateRef = useRef<{
-    active: boolean;
-    mode: 'add' | 'remove';
-  }>({ active: false, mode: 'add' });
+  const lexemeEntities = useMemo(() => {
+    if (entityMode !== 'lexemes') return [];
+    return filterAndSortCocaLexemes(cocaLexemes, userRecordsMap, criteria, sortBy);
+  }, [entityMode, cocaLexemes, userRecordsMap, criteria, sortBy]);
 
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (dragSelectStateRef.current.active) {
-        dragSelectStateRef.current.active = false;
+  const familyEntities = useMemo(() => {
+    if (entityMode !== 'families') return [];
+    const q = criteria.searchQuery.trim().toLowerCase();
+    const bandSet = criteria.bands.length > 0 ? new Set(criteria.bands) : null;
+    const result = families.filter((fam) => {
+      if (bandSet && !bandSet.has(fam.bandNumber)) return false;
+      if (criteria.sourceFilter === 'cet_all' || criteria.sourceFilter === 'cet4' || criteria.sourceFilter === 'cet6') {
+        if (fam.cetMemberCount === 0) return false;
       }
-    };
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, []);
+      if (criteria.sourceFilter === 'both_bnc_coca' || criteria.sourceFilter === 'coca_all') {
+        if ((fam.cocaMatchedMemberCount || 0) === 0) return false;
+      }
+      if (q) {
+        if (fam.normalizedHeadword.includes(q)) return true;
+        return fam.members.some((m) => m.normalized.includes(q));
+      }
+      return true;
+    });
+    result.sort((a, b) => {
+      if (sortBy === 'coca_rank_asc') {
+        return (a.headwordCocaRank ?? 999999) - (b.headwordCocaRank ?? 999999);
+      }
+      if (sortBy === 'band_asc') {
+        return a.bandNumber !== b.bandNumber
+          ? a.bandNumber - b.bandNumber
+          : b.totalFrequency - a.totalFrequency;
+      }
+      if (sortBy === 'alpha_asc' || sortBy === 'word_asc') {
+        return a.normalizedHeadword.localeCompare(b.normalizedHeadword);
+      }
+      return b.totalFrequency - a.totalFrequency;
+    });
+    return result;
+  }, [entityMode, families, criteria, sortBy]);
 
-  const rowHeight = isCompactCardLayout ? 56 : compactDensity ? 40 : 48;
+  const cetEntryEntities = useMemo(() => {
+    if (entityMode !== 'official_entries') return [];
+    const q = criteria.searchQuery.trim().toLowerCase();
+    return cetEntries.filter((entry) => {
+      if (criteria.sourceFilter === 'cet4' && entry.level !== 'CET4') return false;
+      if (criteria.sourceFilter === 'cet6_new' && !entry.isCet6) return false;
+      if (q) {
+        return (
+          entry.rawLine.toLowerCase().includes(q) ||
+          entry.members.some((m) => m.expandedForms.some((w) => w.toLowerCase().includes(q)))
+        );
+      }
+      return true;
+    });
+  }, [entityMode, cetEntries, criteria]);
+
+  const activeListCount = useMemo(() => {
+    switch (entityMode) {
+      case 'headwords':
+        return headwordEntities.length;
+      case 'lexemes':
+        return lexemeEntities.length;
+      case 'families':
+        return familyEntities.length;
+      case 'official_entries':
+        return cetEntryEntities.length;
+      default:
+        return filteredWords.length;
+    }
+  }, [
+    entityMode,
+    headwordEntities.length,
+    lexemeEntities.length,
+    familyEntities.length,
+    cetEntryEntities.length,
+    filteredWords.length,
+  ]);
+
+  const rowHeight = isCompactCardLayout ? 60 : compactDensity ? 38 : 44;
 
   const rowVirtualizer = useVirtualizer({
-    count: filteredWords.length,
+    count: activeListCount,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight,
-    overscan: 18,
+    overscan: 14,
     initialOffset: initialScrollOffset,
   });
 
   useEffect(() => {
     rowVirtualizer.measure();
-  }, [rowHeight, rowVirtualizer]);
+  }, [rowHeight, entityMode, rowVirtualizer]);
 
-  // Restore initialScrollOffset on mount
-  const didRestoreScrollRef = useRef(false);
-  useEffect(() => {
-    if (!didRestoreScrollRef.current && initialScrollOffset > 0 && parentRef.current) {
-      parentRef.current.scrollTop = initialScrollOffset;
-      didRestoreScrollRef.current = true;
-    }
-  }, [initialScrollOffset]);
-
-  const statusCounts = useMemo(() => {
-    const counts: Record<LearningStatus, number> = {
-      unrated: 0,
-      queued: 0,
-      learning: 0,
-      mastered: 0,
-      deferred: 0,
-    };
-    for (const rec of userRecordsMap.values()) {
-      if (counts[rec.status] !== undefined) counts[rec.status]++;
-    }
-    counts.unrated = Math.max(
-      0,
-      totalWordsCount - (counts.queued + counts.learning + counts.mastered + counts.deferred)
-    );
-    return counts;
-  }, [userRecordsMap, totalWordsCount]);
-
-  const toggleStatusFilter = (st: LearningStatus) => {
-    const exists = criteria.statuses.includes(st);
-    const next = exists
-      ? criteria.statuses.filter((s) => s !== st)
-      : [...criteria.statuses, st];
-    onChangeCriteria({ ...criteria, statuses: next });
-  };
-
-  // Range selection helper between two indices in filteredWords
-  const applyRangeSelection = useCallback(
-    (fromIndex: number, toIndex: number, targetChecked: boolean) => {
-      if (filteredWords.length === 0) return;
-      const start = Math.max(0, Math.min(fromIndex, toIndex));
-      const end = Math.min(filteredWords.length - 1, Math.max(fromIndex, toIndex));
-      setSelectedRowIds((prev) => {
-        const next = new Set(prev);
-        for (let i = start; i <= end; i++) {
-          const id = filteredWords[i].id;
-          if (targetChecked) next.add(id);
-          else next.delete(id);
-        }
-        return next;
-      });
-    },
-    [filteredWords]
-  );
-
-  // Handle checkbox or select-mode row interaction (supports Click, Shift+Click range, and Drag start)
-  const handleSelectAtRow = useCallback(
-    (index: number, shiftKey: boolean, forceMode?: 'add' | 'remove') => {
-      const word = filteredWords[index];
-      if (!word) return;
-      const currentlyChecked = selectedRowIds.has(word.id);
-      const nextChecked =
-        forceMode === 'add' ? true : forceMode === 'remove' ? false : !currentlyChecked;
-
-      if (shiftKey && lastAnchorIndexRef.current !== null) {
-        applyRangeSelection(lastAnchorIndexRef.current, index, nextChecked);
-      } else {
-        setSelectedRowIds((prev) => {
-          const next = new Set(prev);
-          if (nextChecked) next.add(word.id);
-          else next.delete(word.id);
-          return next;
-        });
-      }
-      lastAnchorIndexRef.current = index;
-    },
-    [filteredWords, selectedRowIds, applyRangeSelection]
-  );
-
-  const handleSelectTopN = (n: number) => {
-    const next = new Set<string>();
-    const limit = Math.min(n, filteredWords.length);
-    for (let i = 0; i < limit; i++) {
-      next.add(filteredWords[i].id);
-    }
-    setSelectedRowIds(next);
-    if (limit > 0) lastAnchorIndexRef.current = limit - 1;
-  };
-
-  const handleInvertTopN = (n: number) => {
-    const limit = Math.min(n, filteredWords.length);
-    setSelectedRowIds((prev) => {
-      const next = new Set(prev);
-      for (let i = 0; i < limit; i++) {
-        const id = filteredWords[i].id;
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-      }
-      return next;
+  const toggleCocaPos = (pos: CocaRawPos) => {
+    onChangeCriteria((prev) => {
+      const current = prev.cocaPosFilter || [];
+      const next = current.includes(pos)
+        ? current.filter((p) => p !== pos)
+        : [...current, pos];
+      return { ...prev, cocaPosFilter: next };
     });
   };
 
-  const handleClearSelection = () => {
-    setSelectedRowIds(new Set());
-    lastAnchorIndexRef.current = null;
+  const toggleStatusFilter = (st: LearningStatus) => {
+    onChangeCriteria((prev) => {
+      const next = prev.statuses.includes(st)
+        ? prev.statuses.filter((s) => s !== st)
+        : [...prev.statuses, st];
+      return { ...prev, statuses: next };
+    });
   };
 
-  // Dedicated Keyboard Navigation & Selection Handler for ExploreView
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      const isEditable =
-        tag === 'input' ||
-        tag === 'textarea' ||
-        tag === 'select' ||
-        target?.isContentEditable;
-
-      if (isEditable || showSaveModal) return;
-
-      if (e.key === 'Escape') {
-        if (selectedRowIds.size > 0 || isSelectMode) {
-          e.preventDefault();
-          setSelectedRowIds(new Set());
-          setIsSelectMode(false);
-          setShowBatchMoreMenu(false);
-        }
-        return;
-      }
-
-      if (filteredWords.length === 0) return;
-
-      const currentIdx = filteredWords.findIndex((w) => w.id === selectedWordId);
-
-      // ArrowDown / ArrowUp: move active row + scroll virtual list + optional Shift range select
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (target && tag === 'button') {
-          target.blur();
-        }
-        const nextIdx =
-          e.key === 'ArrowDown'
-            ? currentIdx < 0
-              ? 0
-              : Math.min(filteredWords.length - 1, currentIdx + 1)
-            : currentIdx <= 0
-              ? 0
-              : currentIdx - 1;
-
-        const nextWord = filteredWords[nextIdx];
-        if (!nextWord) return;
-
-        onSelectWord(nextWord, false);
-        rowVirtualizer.scrollToIndex(nextIdx, { align: 'auto' });
-
-        if (e.shiftKey) {
-          const anchor = lastAnchorIndexRef.current ?? (currentIdx >= 0 ? currentIdx : nextIdx);
-          applyRangeSelection(anchor, nextIdx, true);
-        } else {
-          lastAnchorIndexRef.current = nextIdx;
-        }
-        return;
-      }
-
-      // Space or 'x': toggle selection of the active cursor row
-      if (e.key === ' ' || e.key.toLowerCase() === 'x') {
-        if (currentIdx >= 0) {
-          e.preventDefault();
-          const activeWord = filteredWords[currentIdx];
-          setSelectedRowIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(activeWord.id)) next.delete(activeWord.id);
-            else next.add(activeWord.id);
-            return next;
-          });
-          lastAnchorIndexRef.current = currentIdx;
-        }
-        return;
-      }
-
-      // Enter: explicitly open/focus the dictionary detail sheet for the active row
-      if (e.key === 'Enter') {
-        if (currentIdx >= 0) {
-          e.preventDefault();
-          onSelectWord(filteredWords[currentIdx], true);
-        }
-        return;
-      }
-
-      // 1-5 shortcuts: if multiple rows are selected, apply batch status; otherwise update active row
-      if (['1', '2', '3', '4', '5'].includes(e.key)) {
-        const statusByNum: Record<string, LearningStatus> = {
-          '1': 'unrated',
-          '2': 'queued',
-          '3': 'learning',
-          '4': 'mastered',
-          '5': 'deferred',
-        };
-        const nextSt = statusByNum[e.key];
-        if (!nextSt) return;
-        e.preventDefault();
-        if (selectedRowIds.size > 0) {
-          onBatchSetStatus(Array.from(selectedRowIds), nextSt);
-        } else if (currentIdx >= 0) {
-          const activeWord = filteredWords[currentIdx];
-          onQuickStatusChange(activeWord.id, activeWord.word, nextSt);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    filteredWords,
-    selectedWordId,
-    selectedRowIds,
-    isSelectMode,
-    showSaveModal,
-    rowVirtualizer,
-    onSelectWord,
-    onBatchSetStatus,
-    onQuickStatusChange,
-    applyRangeSelection,
-  ]);
-
-  const hasNonDefaultFilters =
-    Boolean(activeStaticCollectionId) ||
-    criteria.searchQuery.trim() !== '' ||
-    criteria.sourceFilter !== 'all' ||
-    criteria.statuses.length > 0 ||
-    criteria.bands.length > 0 ||
-    criteria.minBand !== null ||
-    criteria.maxBand !== null ||
-    criteria.minFormFreq !== null ||
-    criteria.maxFormFreq !== null ||
-    criteria.minFamilyFreq !== null ||
-    criteria.maxFamilyFreq !== null ||
-    criteria.familyFilter !== 'all' ||
-    criteria.tags.length > 0 ||
-    criteria.phrasesOnly ||
-    criteria.homographsOnly ||
-    !criteria.includeZeroFreq;
-
-  const handleCollectionSelect = (val: string) => {
-    if (!val) {
-      onSelectStaticCollectionId(null);
-      return;
-    }
-    const col = collections.find((c) => c.id === val);
-    if (!col) return;
-    if (col.type === 'dynamic' && col.filterCriteria) {
-      onSelectStaticCollectionId(null);
-      onChangeCriteria(col.filterCriteria);
-      if (col.sortField) onChangeSortField(col.sortField);
-    } else {
-      onSelectStaticCollectionId(col.id);
-    }
+  const setCocaQuickRankMax = (maxRank: number | null) => {
+    onChangeCriteria((prev) => ({
+      ...prev,
+      minCocaRank: maxRank ? 1 : null,
+      maxCocaRank: maxRank,
+    }));
   };
 
-  const showBatchToolbar = selectedRowIds.size > 0 || isSelectMode;
+  const handleExportAnkiTsv = () => {
+    const targetWords =
+      selectedRowIds.size > 0
+        ? filteredWords.filter((w) => selectedRowIds.has(w.id))
+        : entityMode === 'headwords'
+          ? headwordEntities
+          : filteredWords;
 
-  const desktopGridClass = isWideTableLayout
-    ? 'grid grid-cols-[34px_minmax(130px,1.4fr)_68px_minmax(105px,1.1fr)_minmax(115px,1fr)_96px_76px]'
-    : 'grid grid-cols-[32px_minmax(110px,1.4fr)_64px_minmax(96px,1.1fr)_88px_74px]';
+    const lines = [
+      '#separator:tab',
+      '#html:false',
+      '#columns:Word\tCOCA_Rank\tCOCA_PoS_Breakdown\tBNC_Band\tBNC_Family\tCET_Level\tStatus\tTags\tNote',
+    ];
+    for (const w of targetWords) {
+      const rec = userRecordsMap.get(w.id);
+      const posSummary =
+        (w.cocaLexemes || []).length > 0
+          ? (w.cocaLexemes || [])
+              .map((l) => `${l.pos}:#${l.rank}(${l.frequency})`)
+              .join('; ')
+          : '';
+      const cetLabel =
+        w.isCet4 && w.isCet6 ? 'CET-4/6' : w.isCet4 ? 'CET-4' : w.isCet6 ? 'CET-6' : '';
+      lines.push(
+        [
+          w.word,
+          w.cocaBestPosRank ?? '',
+          posSummary,
+          w.band ?? '',
+          w.headword ?? '',
+          cetLabel,
+          rec?.status ?? 'unrated',
+          (rec?.tags || []).join(','),
+          (rec?.notes || '').replace(/[\r\n\t]+/g, ' '),
+        ].join('\t')
+      );
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/tab-separated-values;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lexical-workbench-anki-${new Date().toISOString().slice(0, 10)}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const hasActiveFilters = useMemo(() => {
+    return (
+      criteria.searchQuery.trim() !== '' ||
+      criteria.sourceFilter !== 'all' ||
+      criteria.bands.length > 0 ||
+      criteria.statuses.length > 0 ||
+      (criteria.cocaPosFilter && criteria.cocaPosFilter.length > 0) ||
+      criteria.minCocaRank !== null ||
+      criteria.maxCocaRank !== null ||
+      Boolean(criteria.cocaMultiPosOnly) ||
+      criteria.familyFilter !== 'all' ||
+      criteria.phrasesOnly ||
+      criteria.homographsOnly ||
+      selectedStaticCollectionId !== null
+    );
+  }, [criteria, selectedStaticCollectionId]);
 
   return (
     <div
-      className={`grid ${
-        showAdvancedDrawer
-          ? 'grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]'
-          : 'grid-rows-[auto_auto_auto_minmax(0,1fr)]'
-      } h-full min-h-0 min-w-0 bg-[var(--bg-surface)]`}
+      ref={rootRef}
+      className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden"
     >
-      {/* TIER 1: 12-Column Search, Scope & Sort Grid Bar */}
-      <div className="px-3 sm:px-4 py-2 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] grid grid-cols-12 items-center gap-2">
-        {/* Cols 1-5: Search Input */}
-        <div className="col-span-12 sm:col-span-5 relative min-w-0">
-          <Search
-            className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-            aria-hidden="true"
-          />
+      {/* Row 1: Entity View Switcher & Dataset Counter */}
+      <div className="px-3.5 sm:px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {(
+            [
+              {
+                id: 'forms',
+                label: '词形视图 (Forms)',
+                badge: filteredWords.length.toLocaleString(),
+              },
+              {
+                id: 'headwords',
+                label: '词头视图 (Headwords)',
+                badge: headwordEntities.length.toLocaleString(),
+              },
+              {
+                id: 'lexemes',
+                label: 'COCA 词元 (Lexemes)',
+                badge:
+                  entityMode === 'lexemes'
+                    ? lexemeEntities.length.toLocaleString()
+                    : cocaLexemes.length.toLocaleString(),
+              },
+              {
+                id: 'families',
+                label: 'BNC 词族 (Families)',
+                badge:
+                  entityMode === 'families'
+                    ? familyEntities.length.toLocaleString()
+                    : families.length.toLocaleString(),
+              },
+              {
+                id: 'official_entries',
+                label: 'CET 考纲词目',
+                badge:
+                  entityMode === 'official_entries'
+                    ? cetEntryEntities.length.toLocaleString()
+                    : cetEntries.length.toLocaleString(),
+              },
+            ] as const
+          ).map((mode) => {
+            const active = entityMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => {
+                  setEntityMode(mode.id);
+                  setSelectedRowIds(new Set());
+                }}
+                className={`px-2.5 py-1 rounded text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+                  active
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <span>{mode.label}</span>
+                <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                  {mode.badge}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right Actions: Export & Save Collection */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowSaveModal(true)}
+            className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] inline-flex items-center gap-1 cursor-pointer"
+            title="将当前筛选条件保存为动态词集"
+          >
+            <BookmarkPlus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">存为词集</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportAnkiTsv}
+            className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer"
+            title="导出包含 COCA 分词性排名、BNC 词族与个人笔记的 Anki TSV 制卡文件"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Anki TSV</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onExportCurrentFiltered('csv')}
+            className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-mono-tabular text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+            title="导出 CSV"
+          >
+            CSV
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowColumnMenu((v) => !v)}
+              className="p-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              title="自定义显示列"
+              aria-label="自定义显示列"
+            >
+              <Columns className="w-3.5 h-3.5" />
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-0 mt-1 w-48 p-2.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl z-30 space-y-1.5 text-xs">
+                <div className="font-semibold text-[var(--text-muted)] text-[10px] uppercase tracking-wider pb-1 border-b border-[var(--border-subtle)]">
+                  表格显示列配置
+                </div>
+                {[
+                  { key: 'cocaRank', label: 'COCA 排名与频次' },
+                  { key: 'cocaPos', label: 'COCA 词性分布' },
+                  { key: 'cetLevel', label: 'CET 四六级考纲' },
+                  { key: 'bncFamily', label: 'BNC 词族与频段' },
+                  { key: 'bncFormFreq', label: 'BNC 词形实测频次' },
+                ].map((col) => (
+                  <label
+                    key={col.key}
+                    className="flex items-center gap-2 py-0.5 cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleCols[col.key as keyof typeof visibleCols]}
+                      onChange={() =>
+                        setVisibleCols((prev) => ({
+                          ...prev,
+                          [col.key]: !prev[col.key as keyof typeof visibleCols],
+                        }))
+                      }
+                      className="rounded border-[var(--border-strong)]"
+                    />
+                    <span>{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: Search, Source Intersection, COCA Quick Tiers, Sort & Advanced Toggle */}
+      <div className="px-3.5 sm:px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center gap-2 shrink-0">
+        {/* Search Input + Match Mode */}
+        <div className="flex items-center flex-1 min-w-[210px] max-w-md bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-md focus-within:border-[var(--accent-primary)] overflow-hidden">
+          <Search className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2.5 shrink-0" />
           <input
             type="search"
-            name="lexicon-filter-query"
-            aria-label="检索单词、短语、词族或考纲原文"
-            autoComplete="off"
-            spellCheck={false}
             value={criteria.searchQuery}
             onChange={(e) =>
-              onChangeCriteria({ ...criteria, searchQuery: e.target.value })
+              onChangeCriteria((prev) => ({ ...prev, searchQuery: e.target.value }))
             }
-            placeholder="搜索单词、词族或考纲原貌…"
-            className="w-full h-8 pl-8 pr-6 text-xs rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus-ring"
+            placeholder="搜索单词、词头、短语 (climate change) 或变体…"
+            aria-label="词库检索"
+            className="w-full px-2 py-1 text-xs bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
           />
           {criteria.searchQuery && (
             <button
               type="button"
-              onClick={() => onChangeCriteria({ ...criteria, searchQuery: '' })}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
-              aria-label="清空搜索词"
+              onClick={() => onChangeCriteria((prev) => ({ ...prev, searchQuery: '' }))}
+              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+              aria-label="清空搜索"
             >
-              <X className="w-3 h-3" aria-hidden="true" />
+              <X className="w-3 h-3" />
             </button>
           )}
-        </div>
-
-        {/* Cols 6-8: Corpus Scope Selector */}
-        <div className="col-span-5 sm:col-span-3 min-w-0">
           <select
-            name="source-scope-compact"
-            aria-label="大纲与词库范围"
-            value={activeStaticCollectionId ? '' : criteria.sourceFilter}
-            onChange={(e) => {
-              onSelectStaticCollectionId(null);
-              onChangeCriteria({
-                ...criteria,
-                sourceFilter: e.target.value as FilterCriteria['sourceFilter'],
-              });
-            }}
-            className="w-full h-8 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs text-[var(--text-primary)] cursor-pointer focus-ring truncate"
+            value={criteria.searchMatchMode || 'auto'}
+            onChange={(e) =>
+              onChangeCriteria((prev) => ({
+                ...prev,
+                searchMatchMode: e.target.value as FilterCriteria['searchMatchMode'],
+              }))
+            }
+            aria-label="搜索匹配模式"
+            className="px-2 py-1 text-[11px] bg-[var(--bg-subtle)] border-l border-[var(--border-subtle)] text-[var(--text-secondary)] focus:outline-none cursor-pointer"
           >
-            {SOURCE_SCOPES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
+            <option value="auto">智能</option>
+            <option value="prefix">前缀</option>
+            <option value="contains">包含</option>
+            <option value="exact">精确</option>
+            <option value="fuzzy">容错</option>
           </select>
         </div>
 
-        {/* Cols 9-12: Sort + Filter Drawer + Export */}
-        <div className="col-span-7 sm:col-span-4 flex items-center justify-end gap-1.5 text-xs min-w-0">
-          <select
-            name="sort-field"
-            aria-label="排序方式"
-            value={sortField}
-            onChange={(e) => onChangeSortField(e.target.value as SortField)}
-            className="h-8 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs text-[var(--text-primary)] cursor-pointer focus-ring min-w-0 truncate"
-          >
-            <option value="priority_weight_desc">推荐学习序 ↓</option>
-            <option value="form_freq_desc">词形频次 ↓</option>
-            <option value="family_freq_desc">词族总频次 ↓</option>
-            <option value="band_asc">频段 1k→25k</option>
-            <option value="word_asc">字母 A→Z</option>
-            <option value="updated_desc">最近标注 ↓</option>
-          </select>
+        {/* 3-Source Filter Dropdown */}
+        <select
+          value={criteria.sourceFilter}
+          onChange={(e) =>
+            onChangeCriteria((prev) => ({
+              ...prev,
+              sourceFilter: e.target.value as SourceFilterOption,
+            }))
+          }
+          aria-label="多源范围与交集筛选"
+          className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] max-w-[230px] truncate cursor-pointer"
+        >
+          {SOURCE_FILTER_LABELS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
 
+        {/* COCA Quick Rank Range Selector */}
+        <div className="hidden lg:flex items-center gap-1 bg-[var(--bg-canvas)] p-0.5 rounded-md border border-[var(--border-subtle)] text-[11px] font-mono-tabular">
+          <span className="px-1.5 text-[var(--text-muted)]">COCA:</span>
+          {[
+            { label: '全量', max: null },
+            { label: '1k', max: 1000 },
+            { label: '3k', max: 3000 },
+            { label: '5k', max: 5000 },
+            { label: '10k', max: 10000 },
+            { label: '20k', max: 20000 },
+            { label: '60k', max: 60000 },
+          ].map((tier) => {
+            const isSelected =
+              criteria.maxCocaRank === tier.max &&
+              (tier.max === null || criteria.minCocaRank === 1 || criteria.minCocaRank === null);
+            return (
+              <button
+                key={tier.label}
+                type="button"
+                onClick={() => setCocaQuickRankMax(tier.max)}
+                className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                  isSelected
+                    ? 'bg-[var(--accent-primary)] text-white font-semibold'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {tier.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sort Selector */}
+        <select
+          value={sortBy}
+          onChange={(e) => onChangeSortBy(e.target.value as SortOption)}
+          aria-label="排序依据"
+          className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] focus:outline-none cursor-pointer"
+        >
+          <option value="priority_weight_desc">综合学习价值降序</option>
+          <option value="coca_rank_asc">COCA 排名升序 (#1→#60k)</option>
+          <option value="coca_freq_desc">COCA 合计频次降序</option>
+          <option value="coca_pos_count_desc">COCA 词性数量降序 (一词多性)</option>
+          <option value="family_freq_desc">BNC 词族总频次降序</option>
+          <option value="form_freq_desc">BNC 词形实测频次降序</option>
+          <option value="band_asc">BNC 频段 1k→25k</option>
+          <option value="alpha_asc">字母顺序 A→Z</option>
+          <option value="updated_desc">最近标注时间</option>
+        </select>
+
+        {/* Advanced Filter Drawer Toggle */}
+        <button
+          type="button"
+          onClick={() => setShowAdvancedFilters((v) => !v)}
+          aria-expanded={showAdvancedFilters}
+          className={`px-2.5 py-1.5 rounded-md border text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+            showAdvancedFilters || hasActiveFilters
+              ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+          <span>多维筛选</span>
+        </button>
+
+        {hasActiveFilters && (
           <button
             type="button"
-            aria-expanded={showAdvancedDrawer}
-            onClick={() => setShowAdvancedDrawer((v) => !v)}
-            className={`h-8 px-2 sm:px-2.5 rounded-md font-medium border inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap shrink-0 focus-ring ${
-              showAdvancedDrawer || criteria.familyFilter !== 'all' || Boolean(activeStaticCollectionId)
-                ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
-                : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
+            onClick={() => {
+              onSelectStaticCollectionId(null);
+              onChangeCriteria(DEFAULT_FILTER_CRITERIA);
+            }}
+            className="px-2 py-1.5 rounded-md text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 inline-flex items-center gap-1 cursor-pointer"
+            title="重置全部筛选条件"
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span className="hidden sm:inline">筛选器</span>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">重置</span>
           </button>
-
-          {onExportCurrentWords && (
-            <div className="relative hidden sm:block shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowExportMenu((v) => !v)}
-                className="h-8 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap focus-ring"
-              >
-                <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span>导出</span>
-              </button>
-              {showExportMenu && (
-                <div className="absolute right-0 mt-1 w-36 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg shadow-lg py-1 z-30 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onExportCurrentWords('txt');
-                      setShowExportMenu(false);
-                    }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-[var(--bg-hover)] cursor-pointer"
-                  >
-                    导出 TXT 词表
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onExportCurrentWords('csv');
-                      setShowExportMenu(false);
-                    }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-[var(--bg-hover)] cursor-pointer"
-                  >
-                    导出 CSV 详情
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      setShowSaveModal(true);
-                    }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-[var(--bg-hover)] text-[var(--accent-primary)] border-t border-[var(--border-subtle)] cursor-pointer"
-                  >
-                    存为动态词集…
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* TIER 2: Quick Facet Bar OR Single-Line Mobile-Friendly Batch Selection Bar */}
-      {showBatchToolbar ? (
-        <div
-          role="region"
-          aria-label="批量选择与操作栏"
-          className="px-3 sm:px-4 py-1.5 bg-[var(--accent-soft)] border-b border-[var(--accent-primary)]/30 flex items-center justify-between gap-1.5 text-xs shrink-0 relative"
-        >
-          {/* Left: Selected Count + Desktop Range Buttons */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="px-2 py-0.5 rounded bg-[var(--accent-primary)] text-white font-semibold font-mono-tabular whitespace-nowrap shrink-0">
-              已选 {selectedRowIds.size}
-            </span>
-
-            <div className="hidden lg:flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => handleSelectTopN(50)}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[var(--text-primary)] font-medium cursor-pointer whitespace-nowrap"
-              >
-                选前 50
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectTopN(200)}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[var(--text-primary)] font-medium cursor-pointer whitespace-nowrap"
-              >
-                选前 200
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectTopN(Math.min(filteredWords.length, 2000))}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[var(--text-primary)] font-medium cursor-pointer whitespace-nowrap"
-              >
-                全选 ({Math.min(filteredWords.length, 2000)})
-              </button>
-              <button
-                type="button"
-                onClick={() => handleInvertTopN(100)}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-medium cursor-pointer whitespace-nowrap"
-              >
-                反选
-              </button>
-              {selectedRowIds.size > 0 && (
+      {/* Collapsible Multi-Dimensional Filter Panel */}
+      {showAdvancedFilters && (
+        <div className="px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] space-y-3 text-xs shrink-0">
+          {/* Line 1: COCA Rank Mode + Custom Rank Range + COCA PoS Pills */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                COCA 排名口径:
+              </span>
+              <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-[11px]">
                 <button
                   type="button"
-                  onClick={handleClearSelection}
-                  className="px-1.5 py-0.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline cursor-pointer whitespace-nowrap"
+                  onClick={() =>
+                    onChangeCriteria((prev) => ({ ...prev, cocaRankMode: 'lemma_pos' }))
+                  }
+                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                    criteria.cocaRankMode !== 'derived_headword'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                      : 'text-[var(--text-secondary)]'
+                  }`}
                 >
-                  清空
+                  词元+词性官方排名 (1–60k)
                 </button>
-              )}
-            </div>
-          </div>
-
-          {/* Right: Core Status Buttons + "More" Menu on Mobile/Tablet */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {(['queued', 'learning', 'mastered'] as LearningStatus[]).map((st) => (
-              <button
-                key={st}
-                type="button"
-                disabled={selectedRowIds.size === 0}
-                onClick={() => onBatchSetStatus(Array.from(selectedRowIds), st)}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] disabled:opacity-40 font-medium cursor-pointer whitespace-nowrap"
-              >
-                {LEARNING_STATUS_META[st].shortLabel}
-              </button>
-            ))}
-
-            {/* Desktop extra status & tag input */}
-            <div className="hidden xl:flex items-center gap-1.5">
-              {(['deferred', 'unrated'] as LearningStatus[]).map((st) => (
                 <button
-                  key={st}
                   type="button"
-                  disabled={selectedRowIds.size === 0}
-                  onClick={() => onBatchSetStatus(Array.from(selectedRowIds), st)}
-                  className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] disabled:opacity-40 font-medium cursor-pointer whitespace-nowrap"
+                  onClick={() =>
+                    onChangeCriteria((prev) => ({
+                      ...prev,
+                      cocaRankMode: 'derived_headword',
+                    }))
+                  }
+                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                    criteria.cocaRankMode === 'derived_headword'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                      : 'text-[var(--text-secondary)]'
+                  }`}
                 >
-                  {LEARNING_STATUS_META[st].shortLabel}
+                  词头合计派生排名 (1–53.9k)
                 </button>
-              ))}
+              </div>
 
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!batchTagInput.trim() || selectedRowIds.size === 0) return;
-                  onBatchAddTag(Array.from(selectedRowIds), batchTagInput.trim());
-                  setBatchTagInput('');
-                }}
-                className="inline-flex items-center gap-1"
-              >
+              <div className="flex items-center gap-1 font-mono-tabular">
                 <input
-                  type="text"
-                  name="batch-tag-input"
-                  aria-label="批量添加标签"
-                  autoComplete="off"
-                  value={batchTagInput}
-                  onChange={(e) => setBatchTagInput(e.target.value)}
-                  placeholder="+ 批量标签 (回车)"
-                  className="h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-primary)] text-xs w-28 focus-ring"
+                  type="number"
+                  min={1}
+                  max={60000}
+                  value={criteria.minCocaRank ?? ''}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({
+                      ...prev,
+                      minCocaRank: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  placeholder="最低排名 1"
+                  className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
                 />
-              </form>
+                <span className="text-[var(--text-muted)]">–</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={60000}
+                  value={criteria.maxCocaRank ?? ''}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({
+                      ...prev,
+                      maxCocaRank: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  placeholder="最高 60000"
+                  className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
+                />
+              </div>
             </div>
 
-            {/* Compact "More" Popover for <xl */}
-            <div className="relative xl:hidden">
-              <button
-                type="button"
-                onClick={() => setShowBatchMoreMenu((v) => !v)}
-                className="px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-0.5 cursor-pointer whitespace-nowrap"
-                aria-label="更多批量操作"
-              >
-                <MoreHorizontal className="w-3.5 h-3.5" />
-                <span>更多</span>
-              </button>
-
-              {showBatchMoreMenu && (
-                <div className="absolute right-0 top-full mt-1 w-56 p-2.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-40 space-y-2.5 text-xs">
-                  <div className="flex flex-wrap gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleSelectTopN(50);
-                        setShowBatchMoreMenu(false);
-                      }}
-                      className="px-2 py-1 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-primary)] cursor-pointer"
-                    >
-                      选前 50
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleSelectTopN(200);
-                        setShowBatchMoreMenu(false);
-                      }}
-                      className="px-2 py-1 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-primary)] cursor-pointer"
-                    >
-                      选前 200
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleInvertTopN(100);
-                        setShowBatchMoreMenu(false);
-                      }}
-                      className="px-2 py-1 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] cursor-pointer"
-                    >
-                      反选
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleClearSelection();
-                        setShowBatchMoreMenu(false);
-                      }}
-                      className="px-2 py-1 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-rose-600 cursor-pointer"
-                    >
-                      清空已选
-                    </button>
-                  </div>
-
-                  <div className="flex gap-1 pt-1 border-t border-[var(--border-subtle)]">
-                    {(['deferred', 'unrated'] as LearningStatus[]).map((st) => (
-                      <button
-                        key={st}
-                        type="button"
-                        disabled={selectedRowIds.size === 0}
-                        onClick={() => {
-                          onBatchSetStatus(Array.from(selectedRowIds), st);
-                          setShowBatchMoreMenu(false);
-                        }}
-                        className="flex-1 py-1 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] disabled:opacity-40 font-medium cursor-pointer"
-                      >
-                        标为{LEARNING_STATUS_META[st].shortLabel}
-                      </button>
-                    ))}
-                  </div>
-
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!batchTagInput.trim() || selectedRowIds.size === 0) return;
-                      onBatchAddTag(Array.from(selectedRowIds), batchTagInput.trim());
-                      setBatchTagInput('');
-                      setShowBatchMoreMenu(false);
-                    }}
-                    className="flex gap-1 pt-1 border-t border-[var(--border-subtle)]"
-                  >
-                    <input
-                      type="text"
-                      value={batchTagInput}
-                      onChange={(e) => setBatchTagInput(e.target.value)}
-                      placeholder="输入标签名 (仅加标签)…"
-                      className="flex-1 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs"
-                    />
-                    <button
-                      type="submit"
-                      disabled={selectedRowIds.size === 0 || !batchTagInput.trim()}
-                      className="px-2 py-1 rounded bg-[var(--accent-primary)] text-white disabled:opacity-40 font-medium cursor-pointer whitespace-nowrap"
-                    >
-                      添加
-                    </button>
-                  </form>
-                </div>
-              )}
+            {/* Multi-PoS & Headword Toggles */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={Boolean(criteria.cocaMultiPosOnly)}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({ ...prev, cocaMultiPosOnly: e.target.checked }))
+                  }
+                  className="rounded border-[var(--border-strong)]"
+                />
+                <span>仅多词性词头 (≥2 PoS)</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={criteria.familyFilter === 'headword_only'}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({
+                      ...prev,
+                      familyFilter: e.target.checked ? 'headword_only' : 'all',
+                    }))
+                  }
+                  className="rounded border-[var(--border-strong)]"
+                />
+                <span>仅 BNC 词族首词</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={criteria.homographsOnly}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({ ...prev, homographsOnly: e.target.checked }))
+                  }
+                  className="rounded border-[var(--border-strong)]"
+                />
+                <span>CET 同形异义词</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={criteria.phrasesOnly}
+                  onChange={(e) =>
+                    onChangeCriteria((prev) => ({ ...prev, phrasesOnly: e.target.checked }))
+                  }
+                  className="rounded border-[var(--border-strong)]"
+                />
+                <span>多词表达</span>
+              </label>
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setIsSelectMode(false);
-                setShowBatchMoreMenu(false);
-                handleClearSelection();
-              }}
-              className="px-1.5 py-0.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-medium cursor-pointer whitespace-nowrap"
-            >
-              退出
-            </button>
           </div>
-        </div>
-      ) : (
-        <div className="px-3 sm:px-4 py-1.5 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 text-xs shrink-0 overflow-x-auto no-scrollbar">
-          {/* Left Facets: Band Ranges + Status Filters + Reset */}
-          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
-            <div className="inline-flex items-center gap-0.5">
-              {BAND_RANGES.map((preset) => {
-                const active =
-                  criteria.minBand === preset.min &&
-                  criteria.maxBand === preset.max &&
-                  criteria.bands.length === 0;
+
+          {/* Line 2: COCA Part-of-Speech Filter Pills */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
+              COCA 词性:
+            </span>
+            {MAJOR_COCA_POS.map((pos) => {
+              const meta = COCA_POS_META[pos];
+              const active = (criteria.cocaPosFilter || []).includes(pos);
+              return (
+                <button
+                  key={pos}
+                  type="button"
+                  onClick={() => toggleCocaPos(pos)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)] text-white font-semibold'
+                      : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {meta.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Line 3: BNC Band Presets & Learning Status Filters */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
+                BNC 频段:
+              </span>
+              {[
+                { label: '全部', bands: [] as number[] },
+                { label: '1k–3k', bands: [1, 2, 3] },
+                { label: '4k–6k', bands: [4, 5, 6] },
+                { label: '7k–10k', bands: [7, 8, 9, 10] },
+                {
+                  label: '11k–25k',
+                  bands: Array.from({ length: 15 }, (_, i) => i + 11),
+                },
+              ].map((preset) => {
+                const isSelected =
+                  preset.bands.length === criteria.bands.length &&
+                  preset.bands.every((b) => criteria.bands.includes(b));
                 return (
                   <button
                     key={preset.label}
                     type="button"
                     onClick={() =>
-                      onChangeCriteria({
-                        ...criteria,
-                        bands: [],
-                        minBand: preset.min,
-                        maxBand: preset.max,
-                      })
+                      onChangeCriteria((prev) => ({ ...prev, bands: preset.bands }))
                     }
-                    className={`px-1.5 sm:px-2 py-0.5 rounded font-mono-tabular text-[11px] transition-colors cursor-pointer whitespace-nowrap focus-ring ${
-                      active
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border cursor-pointer ${
+                      isSelected
+                        ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)] text-[var(--accent-primary)] font-semibold'
+                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
                     }`}
                   >
                     {preset.label}
@@ -830,9 +841,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               })}
             </div>
 
-            <span className="text-[var(--border-strong)]">|</span>
-
-            <div className="inline-flex items-center gap-0.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
+                学习状态:
+              </span>
               {ALL_STATUSES.map((st) => {
                 const meta = LEARNING_STATUS_META[st];
                 const active = criteria.statuses.includes(st);
@@ -841,259 +853,171 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     key={st}
                     type="button"
                     onClick={() => toggleStatusFilter(st)}
-                    className={`px-1.5 sm:px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1 focus-ring ${
+                    className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
                       active
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                        ? `${meta.badgeClass} font-semibold`
+                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
                     }`}
                   >
-                    <span>{meta.shortLabel}</span>
-                    <span className="hidden xl:inline font-mono-tabular text-[10px] opacity-75">
-                      {statusCounts[st]}
-                    </span>
+                    {meta.shortLabel}
                   </button>
                 );
               })}
             </div>
-
-            {hasNonDefaultFilters && (
-              <button
-                type="button"
-                onClick={() => {
-                  onSelectStaticCollectionId(null);
-                  onChangeCriteria(DEFAULT_FILTER_CRITERIA);
-                }}
-                className="px-2 py-0.5 rounded text-[11px] text-[var(--accent-primary)] hover:bg-[var(--accent-soft)] font-medium inline-flex items-center gap-1 cursor-pointer whitespace-nowrap focus-ring"
-              >
-                <RotateCcw className="w-3 h-3" aria-hidden="true" />
-                <span>重置</span>
-              </button>
-            )}
           </div>
 
-          {/* Right: Total Filtered Count + Batch Selection Mode Entry */}
-          <div className="flex items-center gap-2 shrink-0 ml-auto">
-            <span className="hidden md:inline text-[11px] font-mono-tabular text-[var(--text-muted)] whitespace-nowrap">
-              共 {filteredWords.length.toLocaleString()} 词
-            </span>
-            <button
-              type="button"
-              onClick={() => handleSelectTopN(50)}
-              className="hidden lg:inline-flex px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent-primary)] cursor-pointer whitespace-nowrap focus-ring"
-            >
-              选前 50
-            </button>
-            <button
-              type="button"
-              aria-pressed={isSelectMode}
-              onClick={() => setIsSelectMode((v) => !v)}
-              className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:border-[var(--accent-primary)] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap focus-ring"
-              title="开启后点击整行即可勾选词条，支持 Shift+点击连选"
-            >
-              <ListChecks className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>批量选择</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Collapsible Precision Filter Drawer */}
-      {showAdvancedDrawer && (
-        <div className="px-4 py-3 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] flex flex-wrap items-center gap-3 sm:gap-4 text-xs shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[var(--text-secondary)] shrink-0">词形角色:</span>
-            <select
-              name="family-role-quick"
-              aria-label="词族角色过滤"
-              value={criteria.familyFilter}
-              onChange={(e) =>
-                onChangeCriteria({
-                  ...criteria,
-                  familyFilter: e.target.value as FilterCriteria['familyFilter'],
-                })
-              }
-              className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] cursor-pointer focus-ring"
-            >
-              <option value="all">全部词形角色</option>
-              <option value="headword_only">仅词族代表词 (词头)</option>
-              <option value="derived_only">仅派生与变形词</option>
-              <option value="has_cet_peers">同族含四六级词</option>
-              <option value="high_freq_unmastered_member">1k–5k 未掌握成员</option>
-              <option value="high_family_low_form">高频词族低频派生词</option>
-            </select>
-          </div>
-
-          {collections.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-[var(--text-secondary)] shrink-0">所属词集:</span>
-              <select
-                name="collection-quick-select"
-                aria-label="按词集过滤"
-                value={activeStaticCollectionId || ''}
-                onChange={(e) => handleCollectionSelect(e.target.value)}
-                className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] cursor-pointer focus-ring max-w-[180px] truncate"
-              >
-                <option value="">全部词集 / 批次…</option>
-                {collections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+          {/* Optional Static Collection or Personal Tag Filter */}
+          {(staticCollections.length > 0 || allAvailableTags.length > 0) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-[var(--text-muted)]">
+                  限定词集:
+                </span>
+                <select
+                  value={selectedStaticCollectionId || ''}
+                  onChange={(e) => onSelectStaticCollectionId(e.target.value || null)}
+                  className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
+                >
+                  <option value="">不限词集 (全库检索)</option>
+                  {staticCollections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.wordIds.length})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
-
-          <div className="flex items-center gap-2">
-            <span className="text-[var(--text-secondary)] shrink-0">精确频段 (1–25k):</span>
-            <input
-              type="number"
-              name="min-band"
-              aria-label="最小频段"
-              min={1}
-              max={25}
-              placeholder="1"
-              value={criteria.minBand ?? ''}
-              onChange={(e) =>
-                onChangeCriteria({
-                  ...criteria,
-                  minBand: e.target.value ? parseInt(e.target.value, 10) : null,
-                })
-              }
-              className="w-14 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] font-mono-tabular"
-            />
-            <span>–</span>
-            <input
-              type="number"
-              name="max-band"
-              aria-label="最大频段"
-              min={1}
-              max={25}
-              placeholder="25"
-              value={criteria.maxBand ?? ''}
-              onChange={(e) =>
-                onChangeCriteria({
-                  ...criteria,
-                  maxBand: e.target.value ? parseInt(e.target.value, 10) : null,
-                })
-              }
-              className="w-14 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] font-mono-tabular"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[var(--text-secondary)] shrink-0">最低词形频次:</span>
-            <input
-              type="number"
-              name="min-form-freq"
-              aria-label="最低词形频次"
-              min={0}
-              placeholder="0"
-              value={criteria.minFormFreq ?? ''}
-              onChange={(e) =>
-                onChangeCriteria({
-                  ...criteria,
-                  minFormFreq: e.target.value ? parseInt(e.target.value, 10) : null,
-                })
-              }
-              className="w-24 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] font-mono-tabular"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-[var(--text-secondary)]">
-            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={criteria.phrasesOnly}
-                onChange={(e) =>
-                  onChangeCriteria({ ...criteria, phrasesOnly: e.target.checked })
-                }
-              />
-              <span>仅多词短语</span>
-            </label>
-            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={criteria.homographsOnly}
-                onChange={(e) =>
-                  onChangeCriteria({ ...criteria, homographsOnly: e.target.checked })
-                }
-              />
-              <span>仅同形异义词</span>
-            </label>
-            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={criteria.includeZeroFreq}
-                onChange={(e) =>
-                  onChangeCriteria({ ...criteria, includeZeroFreq: e.target.checked })
-                }
-              />
-              <span>含 0 频词</span>
-            </label>
-            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={criteria.includeUnrankedFreq}
-                onChange={(e) =>
-                  onChangeCriteria({ ...criteria, includeUnrankedFreq: e.target.checked })
-                }
-              />
-              <span>含无独立频次词</span>
-            </label>
-          </div>
         </div>
       )}
 
-      {/* Container-Responsive Table Header */}
-      {!isCompactCardLayout ? (
-        <div
-          className={`${desktopGridClass} items-center px-3 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none`}
-        >
-          <div className="flex items-center">
-            <div
-              role="checkbox"
-              aria-checked={selectedRowIds.size > 0}
-              aria-label="勾选前50项或取消全选"
-              tabIndex={-1}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                if (selectedRowIds.size > 0) handleClearSelection();
-                else handleSelectTopN(50);
-              }}
-              className="p-1 -ml-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer flex items-center"
-              title="点击选前 50 项 / 清空选择"
+      {/* Batch Action Bar when rows are selected */}
+      {selectedRowIds.size > 0 && (
+        <div className="px-4 py-2 bg-[var(--accent-soft)] border-b border-[var(--accent-primary)]/30 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+          <div className="flex items-center gap-2 font-medium text-[var(--accent-primary)]">
+            <span>已选 {selectedRowIds.size} 项</span>
+            <button
+              type="button"
+              onClick={() => setSelectedRowIds(new Set())}
+              className="underline text-[11px] cursor-pointer"
             >
-              {selectedRowIds.size > 0 ? (
-                <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-primary)]" aria-hidden="true" />
-              ) : (
-                <Square className="w-3.5 h-3.5 text-[var(--text-muted)]" aria-hidden="true" />
+              取消选择
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {ALL_STATUSES.map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => {
+                  onBatchSetStatus(Array.from(selectedRowIds), st, '探索视图批量标注');
+                  setSelectedRowIds(new Set());
+                }}
+                className="px-2 py-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11px] font-medium hover:border-[var(--accent-primary)] cursor-pointer"
+              >
+                标为{LEARNING_STATUS_META[st].shortLabel}
+              </button>
+            ))}
+            <div className="inline-flex items-center gap-1">
+              <input
+                type="text"
+                value={batchTagInput}
+                onChange={(e) => setBatchTagInput(e.target.value)}
+                placeholder="批量加标签…"
+                className="w-24 px-2 py-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11px]"
+              />
+              {batchTagInput.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onBatchAddTag(Array.from(selectedRowIds), batchTagInput.trim());
+                    setBatchTagInput('');
+                  }}
+                  className="px-2 py-1 rounded bg-[var(--accent-primary)] text-white text-[11px] cursor-pointer"
+                >
+                  <Tag className="w-3 h-3" />
+                </button>
               )}
             </div>
           </div>
-          <div>词条 (含考纲原貌)</div>
-          <div>大纲</div>
-          <div>词族与频段</div>
-          {isWideTableLayout && <div>同族占比 / 标签</div>}
-          <div className="text-right pr-2">词形频次</div>
+        </div>
+      )}
+
+      {/* Table Header */}
+      {entityMode === 'lexemes' ? (
+        <div className="grid grid-cols-[56px_minmax(120px,1.3fr)_76px_92px_minmax(100px,1fr)_88px_78px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+          <div>官方排名</div>
+          <div>词元 (Headword)</div>
+          <div>词性 (PoS)</div>
+          <div className="text-right pr-3">COCA 频次</div>
+          <div>占词头比 / 多性分布</div>
+          <div>BNC / 考纲</div>
+          <div className="text-right">词性状态</div>
+        </div>
+      ) : entityMode === 'families' ? (
+        <div className="grid grid-cols-[64px_minmax(130px,1.3fr)_92px_96px_minmax(140px,1.5fr)_76px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+          <div>BNC 频段</div>
+          <div>词族首词</div>
+          <div className="text-right pr-3">族总频次</div>
+          <div>COCA 首词排名</div>
+          <div>派生与屈折成员预览</div>
+          <div className="text-right">操作</div>
+        </div>
+      ) : entityMode === 'official_entries' ? (
+        <div className="grid grid-cols-[68px_72px_minmax(180px,1.6fr)_minmax(150px,1.4fr)] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+          <div>大纲行号</div>
+          <div>考纲级别</div>
+          <div>官方词目原貌 (含变体/斜杠/同形上标)</div>
+          <div>展开词形与 COCA/BNC 映射</div>
+        </div>
+      ) : !isCompactCardLayout ? (
+        <div className="grid grid-cols-[28px_minmax(130px,1.35fr)_105px_minmax(110px,1.15fr)_68px_minmax(96px,1fr)_76px_74px] items-center px-3.5 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none">
+          <div className="flex items-center">
+            <button
+              type="button"
+              onClick={() => {
+                const list = entityMode === 'headwords' ? headwordEntities : filteredWords;
+                if (selectedRowIds.size > 0) setSelectedRowIds(new Set());
+                else setSelectedRowIds(new Set(list.slice(0, 50).map((w) => w.id)));
+              }}
+              className="text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
+              title="勾选前 50 项 / 清空选择"
+            >
+              {selectedRowIds.size > 0 ? (
+                <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
+              ) : (
+                <Square className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+          <div>{entityMode === 'headwords' ? '词头 (Headword)' : '词形 (Word Form)'}</div>
+          <div>COCA 排名 · 频次</div>
+          <div>COCA 词性分布</div>
+          <div>考纲</div>
+          <div>BNC 词族</div>
+          <div className="text-right pr-2">BNC 词频</div>
           <div className="text-right">状态</div>
         </div>
       ) : (
         <div className="px-3.5 py-1.5 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-          <span>词条与词族 ({filteredWords.length.toLocaleString()})</span>
-          <span>学习状态</span>
+          <span>
+            {entityMode === 'headwords' ? '词头列表' : '词形列表'} (
+            {activeListCount.toLocaleString()})
+          </span>
+          <span>COCA · BNC · 状态</span>
         </div>
       )}
 
-      {/* Virtualized Corpus Rows */}
+      {/* Virtualized Body */}
       <div
         ref={parentRef}
         onScroll={(e) => onScrollOffsetChange?.(e.currentTarget.scrollTop)}
         className="lexicon-table-container flex-1 overflow-y-auto overflow-x-hidden min-h-0 bg-[var(--bg-surface)] select-none"
       >
-        {filteredWords.length === 0 ? (
-          <div className="py-24 px-6 text-center">
+        {activeListCount === 0 ? (
+          <div className="py-20 px-6 text-center space-y-2">
             <p className="text-sm font-medium text-[var(--text-primary)]">
-              当前筛选范围内没有匹配词条
+              当前筛选条件下没有匹配记录
             </p>
             <button
               type="button"
@@ -1101,7 +1025,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 onSelectStaticCollectionId(null);
                 onChangeCriteria(DEFAULT_FILTER_CRITERIA);
               }}
-              className="mt-3 px-3.5 py-1.5 rounded-md text-xs font-medium bg-[var(--accent-primary)] text-white cursor-pointer focus-ring"
+              className="px-3.5 py-1.5 rounded-md text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
             >
               重置全部筛选
             </button>
@@ -1116,49 +1040,112 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const rowIndex = virtualRow.index;
-              const word = filteredWords[rowIndex];
-              const userRec = userRecordsMap.get(word.id);
-              const status: LearningStatus = userRec?.status || 'unrated';
-              const statusMeta = LEARNING_STATUS_META[status];
-              const isSelected = word.id === selectedWordId;
-              const isChecked = selectedRowIds.has(word.id);
 
-              // Check if CET2016 rawMember has special variant notation (e.g. sober/-re, colo(u)r)
-              const specialCetRaw = word.cetRefs
-                .map((r) => r.rawMember.replace(/^★/, '').replace(/[¹²³⁴⁵]/g, ''))
-                .find((raw) => raw.toLowerCase() !== word.word.toLowerCase());
+              // ================= MODE A: COCA LEXEMES (60,000) =================
+              if (entityMode === 'lexemes') {
+                const lex = lexemeEntities[rowIndex];
+                if (!lex) return null;
+                const wordItem = wordsMap.get(lex.normalizedHeadword);
+                const userRec = userRecordsMap.get(lex.normalizedHeadword);
+                const posSt: LearningStatus =
+                  userRec?.posStatuses?.[lex.pos] || userRec?.status || 'unrated';
+                const posMeta = COCA_POS_META[lex.pos];
+                const sharePct = Math.round(lex.shareInHeadwordPct);
 
-              const freqText = formatCompactFrequency(
-                word.formFrequency,
-                word.inBnc,
-                word.bncLinkedViaVariant
-              );
-              const sharePct = getIntraFamilySharePct(
-                word.formFrequency,
-                word.familyFrequency,
-                word.inBnc,
-                word.bncLinkedViaVariant
-              );
-              const roleSummary = formatFamilyRoleAndShare(
-                word.isHeadword,
-                word.familyMemberCount,
-                word.formFrequency,
-                word.familyFrequency,
-                word.inBnc,
-                word.bncLinkedViaVariant
-              );
-
-              if (isCompactCardLayout) {
                 return (
                   <div
-                    key={word.id}
-                    onClick={(e) => {
-                      if (isSelectMode || e.shiftKey) {
-                        handleSelectAtRow(rowIndex, e.shiftKey);
-                      } else {
-                        lastAnchorIndexRef.current = rowIndex;
-                        onSelectWord(word, true);
-                      }
+                    key={lex.id}
+                    onClick={() => wordItem && onSelectWord(wordItem, true)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="grid grid-cols-[56px_minmax(120px,1.3fr)_76px_92px_minmax(100px,1fr)_88px_78px] items-center px-4 border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
+                      #{lex.rank.toLocaleString()}
+                    </div>
+                    <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                      <span
+                        translate="no"
+                        className="font-serif-lexicon font-semibold text-[15px] text-[var(--text-primary)] truncate"
+                      >
+                        {lex.headword}
+                      </span>
+                      {wordItem && (wordItem.cocaPosCount || 0) > 1 && (
+                        <span className="text-[10px] font-mono-tabular text-[var(--text-muted)]">
+                          ({wordItem.cocaPosCount}性)
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-semibold ${posMeta?.badgeClass || ''}`}
+                      >
+                        {posMeta?.shortLabel || lex.pos}
+                      </span>
+                    </div>
+                    <div className="text-right pr-3 font-mono-tabular font-medium text-[var(--text-primary)]">
+                      {lex.frequency.toLocaleString()}
+                    </div>
+                    <div className="flex items-center gap-2 pr-3 font-mono-tabular text-[11px]">
+                      <div className="w-16 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
+                        <div
+                          className="h-full bg-[var(--accent-primary)]"
+                          style={{ width: `${Math.max(3, sharePct)}%` }}
+                        />
+                      </div>
+                      <span className="text-[var(--text-secondary)]">{sharePct}%</span>
+                    </div>
+                    <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] truncate">
+                      {[
+                        wordItem?.band,
+                        wordItem?.isCet4 ? 'CET-4' : wordItem?.isCet6 ? 'CET-6' : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || '—'}
+                    </div>
+                    <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                      {wordItem && onPosStatusChange ? (
+                        <select
+                          aria-label={`${lex.headword} (${lex.pos}) 状态`}
+                          value={userRec?.posStatuses?.[lex.pos] || 'unrated'}
+                          onChange={(e) =>
+                            onPosStatusChange(
+                              wordItem.id,
+                              wordItem.word,
+                              lex.pos,
+                              e.target.value as LearningStatus
+                            )
+                          }
+                          className={`appearance-none text-center px-1.5 py-0.5 rounded text-[11px] font-medium border cursor-pointer ${LEARNING_STATUS_META[posSt].badgeClass}`}
+                        >
+                          {ALL_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {LEARNING_STATUS_META[st].shortLabel}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
+
+              // ================= MODE B: BNC FAMILIES (25,002) =================
+              if (entityMode === 'families') {
+                const fam = familyEntities[rowIndex];
+                if (!fam) return null;
+                const hwItem = wordsMap.get(fam.normalizedHeadword);
+                return (
+                  <div
+                    key={fam.id}
+                    onClick={() => {
+                      if (hwItem) onSelectWord(hwItem, true);
                     }}
                     style={{
                       position: 'absolute',
@@ -1168,24 +1155,156 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
-                    className={`px-3.5 py-2 border-b border-[var(--border-subtle)]/70 flex items-center justify-between gap-2.5 cursor-pointer transition-colors ${
-                      isChecked
-                        ? 'bg-[var(--accent-soft)]'
-                        : isSelected
-                          ? 'bg-[var(--bg-subtle)]'
-                          : 'hover:bg-[var(--bg-hover)]'
+                    className="grid grid-cols-[64px_minmax(130px,1.3fr)_92px_96px_minmax(140px,1.5fr)_76px] items-center px-4 border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <div className="font-mono-tabular font-semibold text-[var(--text-secondary)]">
+                      BNC {fam.band}
+                    </div>
+                    <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                      <span
+                        translate="no"
+                        className="font-serif-lexicon font-bold text-[15px] text-[var(--text-primary)] truncate"
+                      >
+                        {fam.headword}
+                      </span>
+                      <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
+                        ({fam.members.length}词)
+                      </span>
+                    </div>
+                    <div className="text-right pr-3 font-mono-tabular font-semibold text-[var(--text-primary)]">
+                      {fam.totalFrequency.toLocaleString()}
+                    </div>
+                    <div className="font-mono-tabular text-[11px]">
+                      {fam.headwordCocaRank ? (
+                        <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                          #{fam.headwordCocaRank.toLocaleString()}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">未单列</span>
+                      )}
+                    </div>
+                    <div
+                      translate="no"
+                      className="text-[11px] text-[var(--text-muted)] truncate pr-2"
+                    >
+                      {fam.members
+                        .slice(0, 6)
+                        .map((m) => m.word)
+                        .join(' · ')}
+                    </div>
+                    <div className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => onInspectFamily(fam.id, fam.normalizedHeadword)}
+                        className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] text-[var(--accent-primary)] hover:border-[var(--accent-primary)] cursor-pointer"
+                      >
+                        图谱 →
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              // ================= MODE C: CET OFFICIAL ENTRIES (5,377) =================
+              if (entityMode === 'official_entries') {
+                const entry = cetEntryEntities[rowIndex];
+                if (!entry) return null;
+                const expandedWords = Array.from(
+                  new Set(entry.members.flatMap((m) => m.expandedForms))
+                );
+                const firstWord = wordsMap.get(expandedWords[0]?.toLowerCase() || '');
+                return (
+                  <div
+                    key={`${entry.level}-${entry.lineNumber}`}
+                    onClick={() => firstWord && onSelectWord(firstWord, true)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="grid grid-cols-[68px_72px_minmax(180px,1.6fr)_minmax(150px,1.4fr)] items-center px-4 border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <div className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                      #{entry.lineNumber}
+                    </div>
+                    <div className="font-mono-tabular text-[11px] font-semibold">
+                      {entry.isCet6 ? (
+                        <span className="text-indigo-700 dark:text-indigo-400">★CET-6</span>
+                      ) : (
+                        <span className="text-teal-700 dark:text-teal-400">CET-4</span>
+                      )}
+                    </div>
+                    <div
+                      translate="no"
+                      className="font-serif-lexicon font-medium text-[var(--text-primary)] truncate pr-3"
+                    >
+                      {entry.rawLine.split('\t').join('  ·  ')}
+                    </div>
+                    <div className="flex items-center gap-1 overflow-hidden">
+                      {expandedWords.slice(0, 5).map((ew) => {
+                        const wObj = wordsMap.get(ew.toLowerCase());
+                        return (
+                          <button
+                            key={ew}
+                            type="button"
+                            translate="no"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (wObj) onSelectWord(wObj, true);
+                            }}
+                            className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[11px] font-mono-tabular text-[var(--text-secondary)] hover:text-[var(--accent-primary)] shrink-0 cursor-pointer"
+                          >
+                            {ew}
+                            {wObj?.cocaBestPosRank ? ` (#${wObj.cocaBestPosRank})` : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              // ================= MODE D & E: HEADWORDS OR FORMS =================
+              const list = entityMode === 'headwords' ? headwordEntities : filteredWords;
+              const word = list[rowIndex];
+              if (!word) return null;
+              const userRec = userRecordsMap.get(word.id);
+              const status: LearningStatus = userRec?.status || 'unrated';
+              const statusMeta = LEARNING_STATUS_META[status];
+              const isSelected = word.id === selectedWordId;
+              const isChecked = selectedRowIds.has(word.id);
+
+              const displayCocaRank =
+                criteria.cocaRankMode === 'derived_headword'
+                  ? (word.cocaHeadwordDerivedRank ?? null)
+                  : (word.cocaBestPosRank ?? null);
+
+              const bncFreqText = formatCompactFrequency(
+                word.formFrequency,
+                word.inBnc,
+                word.bncLinkedViaVariant
+              );
+
+              if (isCompactCardLayout) {
+                return (
+                  <div
+                    key={word.id}
+                    onClick={() => onSelectWord(word, true)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className={`px-3.5 py-2 border-b border-[var(--border-subtle)]/70 flex items-center justify-between gap-2 cursor-pointer ${
+                      isSelected ? 'bg-[var(--bg-subtle)]' : 'hover:bg-[var(--bg-hover)]'
                     }`}
                   >
-                    {isSelectMode && (
-                      <div className="shrink-0">
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-[var(--accent-primary)]" />
-                        ) : (
-                          <Square className="w-4 h-4 text-[var(--text-muted)]" />
-                        )}
-                      </div>
-                    )}
-
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5 min-w-0">
                         <span
@@ -1194,50 +1313,32 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         >
                           {word.word}
                         </span>
-                        {word.homographNumbers.length > 0 && (
-                          <span className="text-[10px] font-mono-tabular text-amber-700 dark:text-amber-400 shrink-0">
-                            #{word.homographNumbers.join(',')}
+                        {displayCocaRank !== null && (
+                          <span className="text-[11px] font-mono-tabular text-blue-600 dark:text-blue-400 font-semibold shrink-0">
+                            COCA #{displayCocaRank.toLocaleString()}
                           </span>
                         )}
-                        {specialCetRaw && (
-                          <span
-                            translate="no"
-                            className="text-[11px] font-mono-tabular text-[var(--accent-primary)] shrink-0 truncate max-w-[90px]"
-                          >
-                            [{specialCetRaw}]
+                        {word.cocaPrimaryPos && (
+                          <span className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0">
+                            {COCA_POS_META[word.cocaPrimaryPos]?.shortLabel}
+                            {(word.cocaPosCount || 0) > 1 ? `+${(word.cocaPosCount || 1) - 1}` : ''}
                           </span>
                         )}
-                        <span className="text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
-                          {[
-                            word.isCet4 && word.isCet6
-                              ? 'CET-4/6'
-                              : word.isCet4
-                                ? 'CET-4'
-                                : word.isCet6
-                                  ? 'CET-6'
-                                  : null,
-                            word.band,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </span>
                       </div>
-                      <div className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate flex items-center gap-1.5">
-                        {word.headword && (
-                          <span translate="no" className="truncate">
-                            族: {word.headword}
-                          </span>
-                        )}
-                        <span>·</span>
-                        <span>频次 {freqText}</span>
-                        {sharePct !== null && <span>(占族 {sharePct}%)</span>}
+                      <div className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate">
+                        {[
+                          word.band ? `BNC ${word.band}` : null,
+                          word.headword ? `族:${word.headword}` : null,
+                          word.isCet4 ? 'CET-4' : word.isCet6 ? 'CET-6' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </div>
                     </div>
 
-                    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div onClick={(e) => e.stopPropagation()}>
                       <select
-                        name={`status-${word.id}`}
-                        aria-label={`${word.word} 状态`}
+                        aria-label={`${word.word} 学习状态`}
                         value={status}
                         onChange={(e) =>
                           onQuickStatusChange(
@@ -1246,7 +1347,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             e.target.value as LearningStatus
                           )
                         }
-                        className={`appearance-none text-center px-2 py-1 rounded text-xs font-medium border cursor-pointer focus-ring ${statusMeta.badgeClass}`}
+                        className={`appearance-none text-center px-2 py-0.5 rounded text-xs font-medium border cursor-pointer ${statusMeta.badgeClass}`}
                       >
                         {ALL_STATUSES.map((st) => (
                           <option key={st} value={st}>
@@ -1262,20 +1363,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               return (
                 <div
                   key={word.id}
-                  onMouseEnter={() => {
-                    if (dragSelectStateRef.current.active) {
-                      handleSelectAtRow(rowIndex, false, dragSelectStateRef.current.mode);
-                    }
-                  }}
-                  onClick={(e) => {
-                    if (isSelectMode || e.shiftKey) {
-                      handleSelectAtRow(rowIndex, e.shiftKey);
-                      onSelectWord(word, false);
-                    } else {
-                      lastAnchorIndexRef.current = rowIndex;
-                      onSelectWord(word, true);
-                    }
-                  }}
+                  onClick={() => onSelectWord(word, true)}
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -1284,7 +1372,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
-                  className={`group ${desktopGridClass} items-center px-3 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
+                  className={`group grid grid-cols-[28px_minmax(130px,1.35fr)_105px_minmax(110px,1.15fr)_68px_minmax(96px,1fr)_76px_74px] items-center px-3.5 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
                     isChecked
                       ? 'bg-[var(--accent-soft)]/90'
                       : isSelected
@@ -1292,43 +1380,27 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         : 'hover:bg-[var(--bg-hover)]'
                   }`}
                 >
-                  {/* Col 1: Focus-Safe Checkbox Cell */}
+                  {/* Col 1: Checkbox */}
                   <div
-                    role="checkbox"
-                    aria-checked={isChecked}
-                    aria-label={`选择 ${word.word}`}
-                    tabIndex={-1}
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
+                    onClick={(e) => {
                       e.stopPropagation();
-                      const nextMode: 'add' | 'remove' = isChecked ? 'remove' : 'add';
-                      dragSelectStateRef.current = {
-                        active: !e.shiftKey,
-                        mode: nextMode,
-                      };
-                      handleSelectAtRow(rowIndex, e.shiftKey, e.shiftKey ? undefined : nextMode);
-                      onSelectWord(word, false);
+                      setSelectedRowIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(word.id)) next.delete(word.id);
+                        else next.add(word.id);
+                        return next;
+                      });
                     }}
-                    className="h-full flex items-center pr-1.5 cursor-pointer"
-                    title="点击勾选 · Shift+点击区间连选 · 按住上下拖动滑选"
+                    className="h-full flex items-center"
                   >
-                    <span
-                      className={`flex items-center rounded transition-opacity ${
-                        isChecked || selectedRowIds.size > 0 || isSelectMode
-                          ? 'opacity-100'
-                          : 'opacity-40 group-hover:opacity-100'
-                      }`}
-                    >
-                      {isChecked ? (
-                        <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-primary)]" aria-hidden="true" />
-                      ) : (
-                        <Square className="w-3.5 h-3.5 text-[var(--text-muted)]" aria-hidden="true" />
-                      )}
-                    </span>
+                    {isChecked ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-[var(--text-muted)] opacity-45 group-hover:opacity-100" />
+                    )}
                   </div>
 
-                  {/* Col 2: Word + Official CET2016 Raw Variant Notation */}
+                  {/* Col 2: Word */}
                   <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
                     <span
                       translate="no"
@@ -1341,44 +1413,96 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         #{word.homographNumbers.join(',')}
                       </span>
                     )}
-                    {specialCetRaw && (
+                    {word.displayVariants.length > 1 && (
                       <span
                         translate="no"
-                        className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate"
-                        title={`考纲原貌: ${specialCetRaw}`}
+                        className="text-[10px] font-mono-tabular text-[var(--text-muted)] truncate"
                       >
-                        [{specialCetRaw}]
+                        [={word.displayVariants.find((v) => v.toLowerCase() !== word.normalized) || word.displayVariants[0]}]
                       </span>
                     )}
                   </div>
 
-                  {/* Col 3: Clean Syllabus Level */}
+                  {/* Col 3: COCA Rank & Total Freq */}
+                  <div className="font-mono-tabular text-[11px] pr-2 whitespace-nowrap">
+                    {visibleCols.cocaRank ? (
+                      word.inCoca && displayCocaRank !== null ? (
+                        <div className="flex items-baseline gap-1">
+                          <span className="font-semibold text-blue-600 dark:text-blue-400">
+                            #{displayCocaRank.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-[var(--text-muted)]">
+                            ({formatCompactFrequency(word.cocaHeadwordTotalFreq ?? null, true)})
+                          </span>
+                        </div>
+                      ) : word.cocaLinkedViaVariant ? (
+                        <span className="text-[10px] text-blue-600/80 dark:text-blue-400/80">
+                          变体映射
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )
+                    ) : (
+                      <span className="text-[var(--text-muted)]">隐藏</span>
+                    )}
+                  </div>
+
+                  {/* Col 4: COCA PoS Distribution */}
+                  <div className="min-w-0 pr-2 flex items-center gap-1 overflow-hidden">
+                    {visibleCols.cocaPos && (word.cocaLexemes || []).length > 0 ? (
+                      <>
+                        {(word.cocaLexemes || []).slice(0, 3).map((lex) => {
+                          const meta = COCA_POS_META[lex.pos];
+                          return (
+                            <span
+                              key={lex.lexemeId}
+                              title={`${meta?.label || lex.pos}: Rank #${lex.rank.toLocaleString()} · Freq ${lex.frequency.toLocaleString()} (${Math.round(lex.sharePct)}%)`}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-medium shrink-0 ${meta?.badgeClass || ''}`}
+                            >
+                              {meta?.shortLabel || lex.pos}
+                            </span>
+                          );
+                        })}
+                        {(word.cocaLexemes || []).length > 3 && (
+                          <span className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0">
+                            +{(word.cocaLexemes || []).length - 3}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
+                        {!word.isHeadword && word.headword ? `← ${word.headword}` : '—'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Col 5: CET Level */}
                   <div className="font-mono-tabular text-[11px] whitespace-nowrap">
-                    {word.isCet4 && word.isCet6 ? (
-                      <span className="text-teal-700 dark:text-teal-400 font-medium">
-                        CET-4/6
-                      </span>
-                    ) : word.isCet4 ? (
-                      <span className="text-teal-700 dark:text-teal-400 font-medium">
-                        CET-4
-                      </span>
-                    ) : word.isCet6 ? (
-                      <span className="text-indigo-700 dark:text-indigo-400 font-medium">
-                        CET-6
-                      </span>
+                    {visibleCols.cetLevel ? (
+                      word.isCet4 && word.isCet6 ? (
+                        <span className="text-teal-700 dark:text-teal-400 font-medium">
+                          CET-4/6
+                        </span>
+                      ) : word.isCet4 ? (
+                        <span className="text-teal-700 dark:text-teal-400 font-medium">CET-4</span>
+                      ) : word.isCet6 ? (
+                        <span className="text-indigo-700 dark:text-indigo-400 font-medium">
+                          {word.isCet6Only ? '★CET-6' : 'CET-6'}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )
                     ) : (
                       <span className="text-[var(--text-muted)]">—</span>
                     )}
                   </div>
 
-                  {/* Col 4: Family & Band (`1k · able`) */}
+                  {/* Col 6: BNC Family & Band */}
                   <div className="min-w-0 pr-2 flex items-center gap-1 font-mono-tabular text-[11px]">
-                    {word.headword ? (
+                    {visibleCols.bncFamily && word.headword ? (
                       <>
                         {word.band && (
-                          <span className="text-[var(--text-muted)] shrink-0">
-                            {word.band} ·
-                          </span>
+                          <span className="text-[var(--text-muted)] shrink-0">{word.band} ·</span>
                         )}
                         <button
                           type="button"
@@ -1388,62 +1512,24 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             e.stopPropagation();
                             if (word.familyId) onInspectFamily(word.familyId, word.id);
                           }}
-                          className="text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:underline truncate cursor-pointer rounded"
-                          title={`查看 ${word.headword} 词族 (${word.familyMemberCount || 1} 词 · 总频次 ${(word.familyFrequency || 0).toLocaleString()})`}
+                          className="text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:underline truncate cursor-pointer"
                         >
                           {word.headword}
                         </button>
                       </>
                     ) : (
-                      <span className="text-[var(--text-muted)]">大纲独立词</span>
+                      <span className="text-[var(--text-muted)]">—</span>
                     )}
                   </div>
 
-                  {/* Col 5 (Wide Table >=760px): Intra-Family Role & Share / Tags */}
-                  {isWideTableLayout && (
-                    <div className="flex items-center gap-1.5 min-w-0 pr-2 font-mono-tabular text-[11px] text-[var(--text-muted)]">
-                      <span className="truncate">{roleSummary}</span>
-                      {userRec?.tags && userRec.tags.length > 0 && (
-                        <span className="text-[var(--accent-primary)] truncate shrink-0">
-                          #{userRec.tags[0]}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Col 6: Clean Single-Value Form Frequency (No Cluttered Dual Number or Log Bar) */}
-                  <div
-                    className="pr-2 text-right font-mono-tabular text-[11px] whitespace-nowrap"
-                    title={
-                      word.formFrequency !== null
-                        ? `词形实测频次: ${word.formFrequency.toLocaleString()}${
-                            word.familyFrequency !== null
-                              ? ` · 词族总频次: ${word.familyFrequency.toLocaleString()} (占族 ${sharePct ?? 0}%)`
-                              : ''
-                          }`
-                        : word.bncLinkedViaVariant
-                          ? `该词形在 BNC/COCA 中无独立频次记录；关联词族总频次: ${(word.familyFrequency || 0).toLocaleString()}`
-                          : 'BNC/COCA 25k 未收录'
-                    }
-                  >
-                    <span
-                      className={
-                        word.formFrequency === 0 || word.formFrequency === null
-                          ? 'text-[var(--text-muted)]'
-                          : 'font-semibold text-[var(--text-primary)]'
-                      }
-                    >
-                      {freqText}
-                    </span>
+                  {/* Col 7: BNC Form Freq */}
+                  <div className="pr-2 text-right font-mono-tabular text-[11px] whitespace-nowrap text-[var(--text-secondary)]">
+                    {visibleCols.bncFormFreq ? bncFreqText : '—'}
                   </div>
 
-                  {/* Col 7: Clean Status Selector */}
-                  <div
-                    className="flex justify-end"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  {/* Col 8: Status Selector */}
+                  <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <select
-                      name={`status-${word.id}`}
                       aria-label={`${word.word} 学习状态`}
                       value={status}
                       onChange={(e) => {
@@ -1454,9 +1540,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         );
                         e.currentTarget.blur();
                       }}
-                      className={`appearance-none text-center px-2 py-0.5 rounded text-[11px] font-medium border cursor-pointer transition-colors focus-ring ${
+                      className={`appearance-none text-center px-2 py-0.5 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
                         status === 'unrated'
-                          ? 'border-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-secondary)]'
+                          ? 'border-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--bg-subtle)]'
                           : statusMeta.badgeClass
                       }`}
                     >
@@ -1489,49 +1575,40 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           >
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                将当前筛选保存为动态词集
+                将当前筛选保存为动态规则词集
               </h3>
               <button
                 type="button"
                 onClick={() => setShowSaveModal(false)}
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
-                aria-label="关闭弹窗"
               >
-                <X className="w-4 h-4" aria-hidden="true" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label
-                  htmlFor="dynamic-col-name"
-                  className="block font-medium text-[var(--text-secondary)] mb-1"
-                >
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">
                   词集名称
                 </label>
                 <input
-                  id="dynamic-col-name"
                   type="text"
                   value={newCollectionName}
                   onChange={(e) => setNewCollectionName(e.target.value)}
-                  placeholder="例如：CET-6 3k-6k 待攻克核心词"
-                  className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] focus-ring"
+                  placeholder="例如：COCA Top 5000 多词性核心实词"
+                  className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label
-                  htmlFor="dynamic-col-desc"
-                  className="block font-medium text-[var(--text-secondary)] mb-1"
-                >
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">
                   规则备注
                 </label>
                 <input
-                  id="dynamic-col-desc"
                   type="text"
                   value={newCollectionDesc}
                   onChange={(e) => setNewCollectionDesc(e.target.value)}
                   placeholder="选填描述…"
-                  className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] focus-ring"
+                  className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
@@ -1550,7 +1627,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   if (!newCollectionName.trim()) return;
                   onSaveDynamicCollection(
                     newCollectionName.trim(),
-                    newCollectionDesc.trim() || '自定义动态筛选词集'
+                    newCollectionDesc.trim() || '自定义多源动态规则词集'
                   );
                   setNewCollectionName('');
                   setNewCollectionDesc('');
@@ -1558,7 +1635,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 }}
                 className="px-4 py-1.5 rounded-md text-xs font-semibold bg-[var(--accent-primary)] text-white cursor-pointer"
               >
-                保存词集
+                保存动态词集
               </button>
             </div>
           </div>

@@ -1,16 +1,21 @@
-import {
+import { getCocaPosMeta } from './types.ts';
+import type {
   BncCocaFamily,
   BncCocaMember,
   BncFamilyMembership,
   CetMemberItem,
   CetOfficialEntry,
   CetWordReference,
+  CocaLexemeRecord,
+  CocaRawJsonEntry,
   DataDiagnosticItem,
   DataDiagnosticsReport,
   ExpansionRuleType,
   LexiconDatabaseBundle,
   LexiconWordItem,
+  ThreeSourceVennSummary,
 } from './types.ts';
+import { parseCoca2020 } from './cocaParser.ts';
 
 const SUPERSCRIPT_MAP: Record<string, number> = {
   '¹': 1,
@@ -135,7 +140,7 @@ export function expandCetMemberToken(rawTokenWithStar: string): {
   if (token.includes('/')) {
     const [leftRaw, rightRaw] = token.split('/').map((s) => s.trim());
     if (rightRaw.startsWith('-')) {
-      const suffix = rightRaw.slice(1); // e.g., 'er', 're', 'yse', 'ise', 'sation', 'tre', 'bre', 'xion', 'sy', 'ce', 'ice', 'iser', 'sational'
+      const suffix = rightRaw.slice(1);
       let altForm: string | null = null;
 
       if (suffix === 'er' && leftRaw.endsWith('or')) {
@@ -190,7 +195,6 @@ export function expandCetMemberToken(rawTokenWithStar: string): {
         };
       }
     } else {
-      // Parallel words separated by slash, e.g., "a/an", "airplane/aeroplane", "check²/cheque"
       const forms = Array.from(new Set([leftRaw, rightRaw].filter(Boolean)));
       return {
         isCet6Star,
@@ -268,7 +272,10 @@ export function parseCet2016(rawContent: string): {
           parsedResult: expanded.expandedForms,
           explanation: expanded.expansionNotes,
         });
-      } else if (expanded.expansionRule === 'slash_suffix' || expanded.expansionRule === 'slash_parallel') {
+      } else if (
+        expanded.expansionRule === 'slash_suffix' ||
+        expanded.expansionRule === 'slash_parallel'
+      ) {
         diagnostics.push({
           id: `cet_slash_${lineNumber}_${idx}`,
           source: 'CET2016',
@@ -364,7 +371,6 @@ export function parseBncCoca(rawContent: string): {
     const rawLine = lines[i].trim();
     if (!rawLine) continue;
 
-    // Skip header line
     if (i === 0 && rawLine.toLowerCase().startsWith('list')) {
       continue;
     }
@@ -409,7 +415,6 @@ export function parseBncCoca(rawContent: string): {
       }
     }
 
-    // Ensure headword is present in members without double counting
     const normHead = headword.toLowerCase();
     if (!memberMap.has(normHead)) {
       memberMap.set(normHead, {
@@ -473,11 +478,13 @@ const PHRASE_CORE_WORD_MAP: Record<string, string> = {
 };
 
 /**
- * Builds the complete cross-referenced LexiconDatabaseBundle from CET2016 and BNC_COCA raw text.
+ * Builds the complete cross-referenced LexiconDatabaseBundle from CET2016, BNC/COCA 25k,
+ * and (optionally) COCA 2020 JSON.
  */
 export function buildLexiconDatabase(
   cetRaw: string,
-  bncRaw: string
+  bncRaw: string,
+  cocaRaw?: string | CocaRawJsonEntry[]
 ): LexiconDatabaseBundle {
   const { entries: cetEntries, diagnostics: cetDiagnostics } = parseCet2016(cetRaw);
   const {
@@ -486,7 +493,13 @@ export function buildLexiconDatabase(
     totalLines: bncTotalLines,
   } = parseBncCoca(bncRaw);
 
-  const diagnostics: DataDiagnosticItem[] = [...cetDiagnostics, ...bncDiagnostics];
+  const parsedCoca = cocaRaw ? parseCoca2020(cocaRaw) : null;
+
+  const diagnostics: DataDiagnosticItem[] = [
+    ...cetDiagnostics,
+    ...bncDiagnostics,
+    ...(parsedCoca ? parsedCoca.diagnostics : []),
+  ];
 
   // Index BNC/COCA members by normalized lowercase form
   const bncFormIndex = new Map<
@@ -532,6 +545,9 @@ export function buildLexiconDatabase(
           isPhrase: member.word.includes(' '),
           hasCapitalVariant: member.word !== member.normalized,
           displayVariants: [member.word],
+          hasHyphen: member.word.includes('-'),
+          hasSlash: member.word.includes('/'),
+          hasApostrophe: member.word.includes("'"),
           inBnc: true,
           hasExactBncForm: true,
           bncLinkedViaVariant: false,
@@ -556,6 +572,18 @@ export function buildLexiconDatabase(
           cetLevels: [],
           cetRefs: [],
           homographNumbers: [],
+          inCoca: false,
+          cocaLinkedViaVariant: false,
+          cocaCanonicalVariant: null,
+          cocaHeadwordTotalFreq: null,
+          cocaHeadwordDerivedRank: null,
+          cocaBestPosRank: null,
+          cocaPrimaryPos: null,
+          cocaPrimaryPosFreq: null,
+          cocaPosCount: 0,
+          cocaPosEntropy: 0,
+          cocaDominantPosSharePct: 0,
+          cocaLexemes: [],
         });
       } else {
         existing.bncMemberships = [...(existing.bncMemberships || []), membership];
@@ -581,13 +609,11 @@ export function buildLexiconDatabase(
   let cetVariantLinkedCount = 0;
 
   for (const entry of cetEntries) {
-    // Collect all expanded forms on this line for peer reference
     const allLineExpandedForms = Array.from(
       new Set(entry.members.flatMap((m) => m.expandedForms))
     );
 
     for (const member of entry.members) {
-      // Find if any sibling variant in the same member is in BNC/COCA (for UK/US or abbreviation fallback)
       let fallbackBncMatch: {
         family: BncCocaFamily;
         member: BncCocaMember;
@@ -639,12 +665,9 @@ export function buildLexiconDatabase(
         let wordItem = wordsMap.get(norm);
 
         if (!wordItem) {
-          // Word is not directly in BNC/COCA by exact lowercase spelling
           const phraseCore = PHRASE_CORE_WORD_MAP[norm] || null;
 
           if (fallbackBncMatch) {
-            // Matched via deterministic UK/US variant or slash abbreviation on the same CET member!
-            // CRITICAL: Never copy sibling formFrequency! This word form is NOT independently in BNC/COCA.
             cetVariantLinkedCount++;
             const { family, viaForm, rule } = fallbackBncMatch;
             const isAbbrev =
@@ -670,6 +693,9 @@ export function buildLexiconDatabase(
               isPhrase: form.includes(' '),
               hasCapitalVariant: form !== norm,
               displayVariants: member.expandedForms,
+              hasHyphen: form.includes('-'),
+              hasSlash: form.includes('/'),
+              hasApostrophe: form.includes("'"),
               inBnc: false,
               hasExactBncForm: false,
               bncLinkedViaVariant: true,
@@ -677,7 +703,7 @@ export function buildLexiconDatabase(
               headword: family.headword,
               band: family.band,
               bandNumber: family.bandNumber,
-              formFrequency: null, // CRITICAL: Do NOT borrow sibling variant's frequency!
+              formFrequency: null, // CRITICAL: Never borrow sibling variant's frequency!
               familyFrequency: family.totalFrequency,
               isHeadword: false,
               familyMemberCount: family.members.length,
@@ -694,9 +720,20 @@ export function buildLexiconDatabase(
               cetLevels: [],
               cetRefs: [],
               homographNumbers: [],
+              inCoca: false,
+              cocaLinkedViaVariant: false,
+              cocaCanonicalVariant: null,
+              cocaHeadwordTotalFreq: null,
+              cocaHeadwordDerivedRank: null,
+              cocaBestPosRank: null,
+              cocaPrimaryPos: null,
+              cocaPrimaryPosFreq: null,
+              cocaPosCount: 0,
+              cocaPosEntropy: 0,
+              cocaDominantPosSharePct: 0,
+              cocaLexemes: [],
             };
           } else {
-            // Truly not in BNC/COCA (e.g., multi-word phrase like "owing to", "baby boom", or proper/special item)
             cetUnmatchedInBncCount++;
             diagnostics.push({
               id: `cross_unmatched_${entry.lineNumber}_${norm}`,
@@ -718,6 +755,9 @@ export function buildLexiconDatabase(
               isPhrase: form.includes(' '),
               hasCapitalVariant: form !== norm,
               displayVariants: member.expandedForms,
+              hasHyphen: form.includes('-'),
+              hasSlash: form.includes('/'),
+              hasApostrophe: form.includes("'"),
               inBnc: false,
               hasExactBncForm: false,
               bncLinkedViaVariant: false,
@@ -725,7 +765,7 @@ export function buildLexiconDatabase(
               headword: null,
               band: null,
               bandNumber: null,
-              formFrequency: null, // CRITICAL: null, never 0!
+              formFrequency: null,
               familyFrequency: null,
               isHeadword: false,
               familyMemberCount: null,
@@ -744,13 +784,23 @@ export function buildLexiconDatabase(
               cetLevels: [],
               cetRefs: [],
               homographNumbers: [],
+              inCoca: false,
+              cocaLinkedViaVariant: false,
+              cocaCanonicalVariant: null,
+              cocaHeadwordTotalFreq: null,
+              cocaHeadwordDerivedRank: null,
+              cocaBestPosRank: null,
+              cocaPrimaryPos: null,
+              cocaPrimaryPosFreq: null,
+              cocaPosCount: 0,
+              cocaPosEntropy: 0,
+              cocaDominantPosSharePct: 0,
+              cocaLexemes: [],
             };
           }
           wordsMap.set(norm, wordItem);
         } else {
-          // Already in wordsMap (from BNC/COCA or earlier CET entry)
           if (form !== norm && wordItem.word === norm) {
-            // Preserve case ambiguity notice (e.g., Biblical/biblical, Internet/internet)
             wordItem.hasCapitalVariant = true;
             if (!wordItem.displayVariants.includes(form)) {
               wordItem.displayVariants.push(form);
@@ -787,7 +837,199 @@ export function buildLexiconDatabase(
     }
   }
 
-  // 3. Calculate CET member counts per BNC/COCA family
+  // 3. Integrate COCA 2020 (when provided)
+  let cocaLexemes: CocaLexemeRecord[] | undefined;
+  let vennSummary: ThreeSourceVennSummary | undefined;
+
+  if (parsedCoca) {
+    for (const [norm, cocaHw] of parsedCoca.headwordsMap.entries()) {
+      let wordItem = wordsMap.get(norm);
+      if (wordItem) {
+        // Attach COCA 2020 observations to existing Form/Headword entity
+        wordItem.inCoca = true;
+        wordItem.cocaHeadwordTotalFreq = cocaHw.totalFrequency;
+        wordItem.cocaHeadwordDerivedRank = cocaHw.derivedRank;
+        wordItem.cocaBestPosRank = cocaHw.bestPosRank;
+        wordItem.cocaPrimaryPos = cocaHw.primaryPos;
+        wordItem.cocaPrimaryPosFreq = cocaHw.primaryPosFreq;
+        wordItem.cocaPosCount = cocaHw.posCount;
+        wordItem.cocaPosEntropy = cocaHw.posEntropy;
+        wordItem.cocaDominantPosSharePct = cocaHw.dominantSharePct;
+        wordItem.cocaLexemes = cocaHw.lexemes;
+
+        // Preserve original COCA capitalization in displayVariants (e.g. TRUE, FALSE)
+        if (cocaHw.headword !== norm) {
+          wordItem.hasCapitalVariant = true;
+          if (!wordItem.displayVariants.includes(cocaHw.headword)) {
+            wordItem.displayVariants.push(cocaHw.headword);
+          }
+        }
+      } else {
+        // COCA-only headword (18,623 items, e.g., "climate change", "R&D", "n't", "and/or", hyphenated lemmas)
+        wordItem = {
+          id: norm,
+          word: cocaHw.headword, // Preserves original COCA orthography ("R&D", "B&B", "climate change")
+          normalized: norm,
+          isPhrase: cocaHw.headword.includes(' '),
+          hasCapitalVariant: cocaHw.headword !== norm,
+          displayVariants:
+            cocaHw.headword !== norm ? [cocaHw.headword, norm] : [cocaHw.headword],
+          hasHyphen: cocaHw.headword.includes('-'),
+          hasSlash: cocaHw.headword.includes('/'),
+          hasApostrophe: cocaHw.headword.includes("'"),
+          inBnc: false,
+          hasExactBncForm: false,
+          bncLinkedViaVariant: false,
+          familyId: null,
+          headword: cocaHw.headword,
+          band: null,
+          bandNumber: null,
+          formFrequency: null, // CRITICAL: Not in BNC 25k, so BNC formFrequency is null!
+          familyFrequency: null,
+          isHeadword: true,
+          familyMemberCount: null,
+          familyCetMemberCount: 0,
+          bncMemberships: [],
+          matchType: 'exact',
+          matchConfidence: 'high',
+          matchNote: 'COCA 2020 官方词头（未在 BNC 25k 词族表独立收录）',
+          relatedPhraseCoreWord: null,
+          inCet: false,
+          isCet4: false,
+          isCet6: false,
+          isCet6Only: false,
+          cetLevels: [],
+          cetRefs: [],
+          homographNumbers: [],
+          inCoca: true,
+          cocaLinkedViaVariant: false,
+          cocaCanonicalVariant: null,
+          cocaHeadwordTotalFreq: cocaHw.totalFrequency,
+          cocaHeadwordDerivedRank: cocaHw.derivedRank,
+          cocaBestPosRank: cocaHw.bestPosRank,
+          cocaPrimaryPos: cocaHw.primaryPos,
+          cocaPrimaryPosFreq: cocaHw.primaryPosFreq,
+          cocaPosCount: cocaHw.posCount,
+          cocaPosEntropy: cocaHw.posEntropy,
+          cocaDominantPosSharePct: cocaHw.dominantSharePct,
+          cocaLexemes: cocaHw.lexemes,
+        };
+        wordsMap.set(norm, wordItem);
+      }
+    }
+
+    // Check CET words that are not directly in COCA, but have a CET sibling variant in the same member slot that IS in COCA (e.g. colour -> color)
+    let cetVariantLinkedToCocaCount = 0;
+    let cetTrulyMissingFromCocaCount = 0;
+
+    for (const norm of cetDistinctSet) {
+      const w = wordsMap.get(norm);
+      if (!w) continue;
+      if (w.inCoca) continue;
+
+      let matchedSiblingInCoca: string | null = null;
+      for (const v of w.displayVariants) {
+        const vNorm = v.toLowerCase();
+        if (vNorm !== norm && parsedCoca.headwordsMap.has(vNorm)) {
+          matchedSiblingInCoca = parsedCoca.headwordsMap.get(vNorm)!.headword;
+          break;
+        }
+      }
+
+      if (matchedSiblingInCoca) {
+        w.cocaLinkedViaVariant = true;
+        w.cocaCanonicalVariant = matchedSiblingInCoca;
+        cetVariantLinkedToCocaCount++;
+      } else {
+        cetTrulyMissingFromCocaCount++;
+      }
+    }
+
+    // Build the 60,000 CocaLexemeRecord array with full cross-source context
+    cocaLexemes = parsedCoca.rawLexemes.map((raw) => {
+      const w = wordsMap.get(raw.normalizedHeadword);
+      const posMeta = getCocaPosMeta(raw.pos);
+      return {
+        id: raw.id,
+        headword: raw.headword,
+        normalizedHeadword: raw.normalizedHeadword,
+        pos: raw.pos,
+        posZh: posMeta.shortZh,
+        posAbbr: posMeta.abbr,
+        rank: raw.rank,
+        frequency: raw.frequency,
+        headwordTotalFreq: raw.headwordTotalFreq,
+        headwordDerivedRank: raw.headwordDerivedRank,
+        headwordPosCount: raw.headwordPosCount,
+        shareInHeadwordPct: raw.shareInHeadwordPct,
+        isPrimaryPos: raw.isPrimaryPos,
+        inBnc: Boolean(w?.inBnc),
+        bncFamilyId: w?.familyId || null,
+        bncHeadword: w?.headword || null,
+        bncBand: w?.band || null,
+        bncBandNumber: w?.bandNumber ?? null,
+        bncFormFrequency: w?.formFrequency ?? null,
+        bncFamilyFrequency: w?.familyFrequency ?? null,
+        inCet: Boolean(w?.inCet),
+        isCet4: Boolean(w?.isCet4),
+        isCet6: Boolean(w?.isCet6),
+        isCet6Only: Boolean(w?.isCet6Only),
+        cetLevels: w?.cetLevels || [],
+      };
+    });
+
+    // Compute exact 7-region Venn diagram across CET, BNC, and COCA normalized forms
+    let allThreeCount = 0;
+    let cetAndBncOnlyCount = 0;
+    let cetAndCocaOnlyCount = 0;
+    let bncAndCocaOnlyCount = 0;
+    let cetOnlyExactCount = 0;
+    let bncOnlyExactCount = 0;
+    let cocaOnlyExactCount = 0;
+
+    for (const w of wordsMap.values()) {
+      const c = w.inCet;
+      const b = w.inBnc;
+      const k = Boolean(w.inCoca);
+      if (c && b && k) allThreeCount++;
+      else if (c && b && !k) cetAndBncOnlyCount++;
+      else if (c && !b && k) cetAndCocaOnlyCount++;
+      else if (!c && b && k) bncAndCocaOnlyCount++;
+      else if (c && !b && !k) cetOnlyExactCount++;
+      else if (!c && b && !k) bncOnlyExactCount++;
+      else if (!c && !b && k) cocaOnlyExactCount++;
+    }
+
+    let bncHeadwordsInCocaCount = 0;
+    for (const fam of bncFamilies) {
+      if (parsedCoca.headwordsMap.has(fam.normalizedHeadword)) {
+        bncHeadwordsInCocaCount++;
+      }
+    }
+
+    vennSummary = {
+      totalDistinctForms: wordsMap.size,
+      cetDistinctForms: cetDistinctSet.size,
+      bncDistinctForms: bncFormIndex.size,
+      cocaDistinctHeadwords: parsedCoca.headwordCount,
+      cocaTotalLexemes: parsedCoca.lexemeCount,
+      allThreeCount,
+      cetAndBncOnlyCount,
+      cetAndCocaOnlyCount,
+      bncAndCocaOnlyCount,
+      cetOnlyExactCount,
+      bncOnlyExactCount,
+      cocaOnlyExactCount,
+      bncAndCocaIntersection: allThreeCount + bncAndCocaOnlyCount,
+      cetAndCocaIntersection: allThreeCount + cetAndCocaOnlyCount,
+      cetAndBncIntersection: allThreeCount + cetAndBncOnlyCount,
+      bncHeadwordsInCocaCount,
+      cetVariantLinkedToCocaCount,
+      cetTrulyMissingFromCocaCount,
+    };
+  }
+
+  // 4. Calculate CET and COCA member counts per BNC/COCA family
   const familyById = new Map<string, BncCocaFamily>();
   for (const fam of bncFamilies) {
     familyById.set(fam.id, fam);
@@ -797,6 +1039,7 @@ export function buildLexiconDatabase(
     let cetCount = 0;
     let cet4Count = 0;
     let cet6Count = 0;
+    let cocaCount = 0;
     for (const mem of fam.members) {
       const w = wordsMap.get(mem.normalized);
       if (w && w.inCet) {
@@ -804,10 +1047,19 @@ export function buildLexiconDatabase(
         if (w.isCet4) cet4Count++;
         if (w.isCet6) cet6Count++;
       }
+      if (w && w.inCoca) {
+        cocaCount++;
+      }
     }
     fam.cetMemberCount = cetCount;
     fam.cet4MemberCount = cet4Count;
     fam.cet6MemberCount = cet6Count;
+    fam.cocaMatchedMemberCount = cocaCount;
+
+    const headWordItem = wordsMap.get(fam.normalizedHeadword);
+    fam.headwordCocaRank = headWordItem?.cocaHeadwordDerivedRank ?? null;
+    fam.headwordCocaFreq = headWordItem?.cocaHeadwordTotalFreq ?? null;
+    fam.headwordBestPosRank = headWordItem?.cocaBestPosRank ?? null;
   }
 
   // Propagate familyCetMemberCount to each LexiconWordItem
@@ -862,6 +1114,19 @@ export function buildLexiconDatabase(
     bncZeroFreqFormCount,
     bncSumMismatchCount,
     bncBandsCount: distinctBands,
+    // COCA 2020 audit fields
+    cocaHeadwordCount: parsedCoca?.headwordCount,
+    cocaLexemeRecordCount: parsedCoca?.lexemeCount,
+    cocaTotalTokenFrequency: parsedCoca?.totalTokenFrequency,
+    cocaRankMin: parsedCoca?.rankMin,
+    cocaRankMax: parsedCoca?.rankMax,
+    cocaHasCompleteRankRange: parsedCoca?.hasCompleteRankRange,
+    cocaHyphenatedHeadwordCount: parsedCoca?.hyphenatedCount,
+    cocaMultiPosHeadwordCount: parsedCoca?.multiPosCount,
+    cocaMultiWordHeadwordCount: parsedCoca?.multiWordCount,
+    cocaCapitalizedHeadwordCount: parsedCoca?.capitalizedCount,
+    cocaPosDistribution: parsedCoca?.posDistribution,
+    venn: vennSummary,
     totalDistinctLexiconWords: words.length,
     bothCetAndBncCount,
     cetOnlyCount,
@@ -870,20 +1135,20 @@ export function buildLexiconDatabase(
   };
 
   return {
-    version: '1.0.0',
+    version: '2.0.0',
     words,
     families: bncFamilies,
     cetEntries,
+    cocaLexemes,
     diagnostics: report,
   };
 }
 
 /**
  * Validates a custom dataset file's basic structure and parses it before saving to IndexedDB.
- * Throws a clear, human-readable Error if the file is empty, malformed, or of the wrong dataset type.
  */
 export function validateCustomDatasetContent(
-  type: 'cet2016' | 'bnc_coca',
+  type: 'cet2016' | 'bnc_coca' | 'coca2020',
   content: string
 ): { entriesCount: number } {
   const trimmed = (content || '').replace(/^\uFEFF/, '').trim();
@@ -891,8 +1156,24 @@ export function validateCustomDatasetContent(
     throw new Error('上传的词表文件为空，请检查文件内容');
   }
 
-  // Reject obvious HTML/JSON/binary uploads
-  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('{')) {
+  if (type === 'coca2020') {
+    if (!trimmed.startsWith('[')) {
+      throw new Error('COCA 2020 词表必须为 JSON 数组格式 (以 "[" 开头)');
+    }
+    const parsedCoca = parseCoca2020(trimmed);
+    if (parsedCoca.headwordCount === 0 || parsedCoca.lexemeCount === 0) {
+      throw new Error('未能从 JSON 文件中解析出有效的 COCA 2020 headword / PoS 记录');
+    }
+    return { entriesCount: parsedCoca.lexemeCount };
+  }
+
+  // Reject obvious HTML/JSON/binary uploads for text wordlists
+  if (
+    trimmed.startsWith('<!DOCTYPE') ||
+    trimmed.startsWith('<html') ||
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('[')
+  ) {
     throw new Error('上传的文件格式无效（检测到 HTML 或 JSON 内容，而非纯文本词表）');
   }
 

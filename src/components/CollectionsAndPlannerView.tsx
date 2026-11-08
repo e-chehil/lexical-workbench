@@ -1,23 +1,24 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
-  LexiconWordItem,
+  ActivityLogEntry,
   BncCocaFamily,
+  COCA_POS_META,
+  FilterCriteria,
+  LEARNING_STATUS_META,
+  LearningStatus,
+  LexiconWordItem,
   UserWordRecord,
   WordCollection,
-  LearningStatus,
-  LEARNING_STATUS_META,
-  FilterCriteria,
 } from '../data/types.ts';
 import {
-  CLOSED_CLASS_STOPWORDS,
+  computeMultiObjectiveStudyCandidates,
   DEFAULT_FILTER_CRITERIA,
-  computeStudyPriorityScore,
   filterAndSortWords,
+  MultiObjectiveStrategyId,
+  MultiObjectiveWeights,
 } from '../data/searchAndFilter.ts';
-import {
-  formatCompactFrequency,
-  formatFamilyRoleAndShare,
-} from '../utils/frequency.ts';
+import { formatCompactFrequency } from '../utils/frequency.ts';
+import { BatchAndActivityView } from './BatchAndActivityView.tsx';
 import {
   Plus,
   Trash2,
@@ -27,6 +28,11 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Lock,
+  Unlock,
+  XCircle,
+  BookMarked,
+  ListChecks,
 } from 'lucide-react';
 
 interface CollectionsAndPlannerViewProps {
@@ -35,6 +41,7 @@ interface CollectionsAndPlannerViewProps {
   wordsMap: Map<string, LexiconWordItem>;
   familiesMap: Map<string, BncCocaFamily>;
   userRecordsMap: Map<string, UserWordRecord>;
+  activityLogs: ActivityLogEntry[];
   onSelectWord: (word: LexiconWordItem) => void;
   onStatusChange: (wordId: string, wordDisplay: string, status: LearningStatus) => void;
   onCreateCollection: (col: Omit<WordCollection, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -46,17 +53,64 @@ interface CollectionsAndPlannerViewProps {
     filenamePrefix: string,
     format: 'txt' | 'csv'
   ) => void;
+  onExecuteBatchImport: (
+    items: {
+      wordId: string;
+      word: string;
+      status?: LearningStatus;
+      tagsToAdd?: string[];
+      noteToAppend?: string;
+    }[],
+    options: {
+      defaultStatus: LearningStatus;
+      commonTags: string[];
+      sourceLabel: string;
+      customTimestamp?: string;
+    }
+  ) => Promise<{ batchId: string; updatedCount: number }>;
+  onRollbackBatch: (batchId: string) => Promise<number>;
+  onUndoSingleLog: (logId: number) => Promise<void>;
+  onExportLogsCsv: () => void;
 }
-
-type PresetStrategy =
-  | 'cet4_core_1k_3k'
-  | 'cet4_remaining'
-  | 'cet6_core_2k_5k'
-  | 'high_value_family_roots'
-  | 'family_completion';
 
 const ALL_STATUSES: LearningStatus[] = ['unrated', 'queued', 'learning', 'mastered', 'deferred'];
 const PAGE_SIZE = 100;
+
+const STRATEGY_META: Record<
+  MultiObjectiveStrategyId,
+  { label: string; subtitle: string; defaultWeights: MultiObjectiveWeights }
+> = {
+  coca_high_freq: {
+    label: 'COCA 高频优先',
+    subtitle: '优先攻克当代美国英语排名最高、且尚未掌握的词元词头',
+    defaultWeights: { cocaWeight: 60, bncWeight: 10, cetWeight: 10, gapWeight: 20 },
+  },
+  bnc_family_value: {
+    label: 'BNC 词族覆盖优先',
+    subtitle: '优先学习 1k–5k 高频且派生词成员丰富的大词族首词',
+    defaultWeights: { cocaWeight: 15, bncWeight: 55, cetWeight: 15, gapWeight: 15 },
+  },
+  cet_syllabus: {
+    label: 'CET 四六级考纲优先',
+    subtitle: '聚焦四级核心与六级新增大纲词，兼顾 COCA 与 BNC 实测词频',
+    defaultWeights: { cocaWeight: 20, bncWeight: 15, cetWeight: 50, gapWeight: 15 },
+  },
+  high_freq_gap: {
+    label: '高频知识缺口补齐',
+    subtitle: '定位 COCA Top 6000 中仍处于未评/待学状态的个人高频盲区',
+    defaultWeights: { cocaWeight: 40, bncWeight: 10, cetWeight: 10, gapWeight: 40 },
+  },
+  family_completion: {
+    label: '熟词族派生词补全',
+    subtitle: '针对已掌握首词或部分成员的词族，补齐族内其余高频派生词',
+    defaultWeights: { cocaWeight: 20, bncWeight: 40, cetWeight: 20, gapWeight: 20 },
+  },
+  custom_multi_objective: {
+    label: '自定义四维多目标规划',
+    subtitle: '自由调节 COCA 词频、BNC 词族、CET 考纲与知识缺口权重并识别帕累托前沿',
+    defaultWeights: { cocaWeight: 35, bncWeight: 25, cetWeight: 25, gapWeight: 15 },
+  },
+};
 
 export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps> = ({
   collections,
@@ -64,6 +118,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
   wordsMap,
   familiesMap,
   userRecordsMap,
+  activityLogs,
   onSelectWord,
   onStatusChange,
   onCreateCollection,
@@ -71,56 +126,114 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
   onApplyDynamicCollectionToExplore,
   onBatchSetStatus,
   onExportWordList,
+  onExecuteBatchImport,
+  onRollbackBatch,
+  onUndoSingleLog,
+  onExportLogsCsv,
 }) => {
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string>(
-    collections[0]?.id || 'builtin-cet4-core'
+  const [studySubTab, setStudySubTab] = useState<'planner' | 'collections' | 'batch_sync'>(
+    'planner'
   );
-  const [mobilePane, setMobilePane] = useState<'list' | 'planner'>('list');
-  const [centerMode, setCenterMode] = useState<'collection' | 'planner_preview'>('collection');
-  const [strategy, setStrategy] = useState<PresetStrategy>('cet4_core_1k_3k');
+
+  // Planner State
+  const [strategy, setStrategy] = useState<MultiObjectiveStrategyId>('coca_high_freq');
+  const [weights, setWeights] = useState<MultiObjectiveWeights>(
+    STRATEGY_META.coca_high_freq.defaultWeights
+  );
   const [batchSize, setBatchSize] = useState<number>(50);
   const [batchName, setBatchName] = useState<string>('');
-  // Default FALSE so saving a study batch NEVER silently overwrites existing statuses!
+  const [onlyPareto, setOnlyPareto] = useState<boolean>(false);
   const [markUnratedAsQueued, setMarkUnratedAsQueued] = useState<boolean>(false);
+  const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [justCreated, setJustCreated] = useState(false);
 
+  // Collections State
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string>(
+    collections[0]?.id || 'builtin-coca-top-1k'
+  );
   const [currentPage, setCurrentPage] = useState(1);
-
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newWordsRaw, setNewWordsRaw] = useState('');
 
-  const centerRef = useRef<HTMLDivElement>(null);
-  const [centerWidth, setCenterWidth] = useState<number>(800);
+  const handleStrategyChange = (next: MultiObjectiveStrategyId) => {
+    setStrategy(next);
+    setWeights(STRATEGY_META[next].defaultWeights);
+  };
 
-  useEffect(() => {
-    const el = centerRef.current;
-    if (!el) return;
-    const updateWidth = () => {
-      if (el.clientWidth > 0) setCenterWidth(el.clientWidth);
-    };
-    updateWidth();
-    if (typeof ResizeObserver !== 'undefined') {
-      const obs = new ResizeObserver(updateWidth);
-      obs.observe(el);
-      return () => obs.disconnect();
-    } else {
-      window.addEventListener('resize', updateWidth);
-      return () => window.removeEventListener('resize', updateWidth);
+  const rawCandidates = useMemo(() => {
+    const computed = computeMultiObjectiveStudyCandidates(words, familiesMap, userRecordsMap, {
+      strategy,
+      customWeights: weights,
+      maxCandidatesPool: Math.max(batchSize * 2, 120),
+    });
+    return excludedIds.size > 0
+      ? computed.filter((c) => !excludedIds.has(c.word.id))
+      : computed;
+  }, [words, familiesMap, userRecordsMap, strategy, weights, batchSize, excludedIds]);
+
+  const plannerCandidates = useMemo(() => {
+    const filtered = onlyPareto
+      ? rawCandidates.filter((c) => c.isParetoOptimal || lockedIds.has(c.word.id))
+      : rawCandidates;
+
+    // Ensure locked items appear first
+    const lockedList = filtered.filter((c) => lockedIds.has(c.word.id));
+    const unlockedList = filtered.filter((c) => !lockedIds.has(c.word.id));
+    return [...lockedList, ...unlockedList].slice(0, batchSize);
+  }, [rawCandidates, onlyPareto, lockedIds, batchSize]);
+
+  const paretoCount = useMemo(
+    () => rawCandidates.filter((c) => c.isParetoOptimal).length,
+    [rawCandidates]
+  );
+
+  const handleSaveBatchAsCollection = () => {
+    if (plannerCandidates.length === 0) return;
+    const meta = STRATEGY_META[strategy];
+    const dateStr = new Date().toISOString().slice(5, 10);
+    const finalName =
+      batchName.trim() || `${meta.label} (${dateStr} · ${plannerCandidates.length}词)`;
+    const ids = plannerCandidates.map((c) => c.word.id);
+
+    onCreateCollection({
+      name: finalName,
+      description: `${meta.subtitle} [权重 COCA:${weights.cocaWeight}/BNC:${weights.bncWeight}/CET:${weights.cetWeight}/缺口:${weights.gapWeight}]`,
+      type: 'study_plan',
+      entityType: 'headword',
+      wordIds: ids,
+      planMetadata: {
+        targetCount: ids.length,
+        formulaDescription: meta.label,
+        strategyMode: strategy,
+        weights,
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    if (markUnratedAsQueued) {
+      const unratedOnlyIds = ids.filter(
+        (id) => (userRecordsMap.get(id)?.status || 'unrated') === 'unrated'
+      );
+      if (unratedOnlyIds.length > 0) {
+        onBatchSetStatus(unratedOnlyIds, 'queued');
+      }
     }
-  }, [mobilePane, centerMode]);
 
-  const isCompactCenter = centerWidth < 580;
+    setBatchName('');
+    setJustCreated(true);
+    setTimeout(() => {
+      setJustCreated(false);
+      setStudySubTab('collections');
+    }, 1200);
+  };
 
+  // Active Collection Data
   const activeCollection = useMemo(() => {
     return collections.find((c) => c.id === selectedCollectionId) || collections[0] || null;
   }, [collections, selectedCollectionId]);
-
-  // Reset pagination when switching collection
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeCollection?.id]);
 
   const activeCollectionWords = useMemo(() => {
     if (!activeCollection) return [];
@@ -145,102 +258,36 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     return activeCollectionWords.slice(start, start + PAGE_SIZE);
   }, [activeCollectionWords, safePage]);
 
-  const plannerCandidates = useMemo(() => {
-    const masteredFamilies = new Set<string>();
-    for (const [wordId, rec] of userRecordsMap.entries()) {
-      if (rec.status === 'mastered') {
-        const entry = wordsMap.get(wordId);
-        if (entry?.familyId) masteredFamilies.add(entry.familyId);
-      }
-    }
-
-    const candidates = words.filter((w) => {
-      if (CLOSED_CLASS_STOPWORDS.has(w.normalized) || w.normalized.length <= 2) return false;
-      const status = userRecordsMap.get(w.id)?.status || 'unrated';
-      if (status === 'mastered' || status === 'deferred') return false;
-
-      switch (strategy) {
-        case 'cet4_core_1k_3k':
-          return w.isCet4 && w.bandNumber !== null && w.bandNumber >= 1 && w.bandNumber <= 3;
-        case 'cet4_remaining':
-          return w.isCet4;
-        case 'cet6_core_2k_5k':
-          return w.isCet6 && w.bandNumber !== null && w.bandNumber >= 2 && w.bandNumber <= 5;
-        case 'high_value_family_roots':
-          return (
-            w.isHeadword &&
-            w.bandNumber !== null &&
-            w.bandNumber <= 4 &&
-            (w.familyMemberCount || 1) >= 5
-          );
-        case 'family_completion':
-          return (
-            !w.isHeadword &&
-            w.familyId !== null &&
-            masteredFamilies.has(w.familyId) &&
-            (w.isCet4 || w.isCet6 || (w.formFrequency || 0) >= 500)
-          );
-        default:
-          return true;
-      }
-    });
-
-    const scored = candidates.map((entry) => {
-      const rec = userRecordsMap.get(entry.id);
-      const { score, reason } = computeStudyPriorityScore(
-        entry,
-        rec,
-        entry.familyId && masteredFamilies.has(entry.familyId) ? 0.5 : 0
+  const handleExportAnkiTsv = (list: LexiconWordItem[], namePrefix: string) => {
+    const lines = [
+      '#separator:tab',
+      '#html:false',
+      '#columns:Word\tCOCA_Rank\tCOCA_PoS\tBNC_Band\tBNC_Family\tCET_Level\tStatus\tNote',
+    ];
+    for (const w of list) {
+      const rec = userRecordsMap.get(w.id);
+      const posStr = (w.cocaLexemes || []).map((l) => `${l.pos}:#${l.rank}`).join('; ');
+      const cetStr = w.isCet4 && w.isCet6 ? 'CET-4/6' : w.isCet4 ? 'CET-4' : w.isCet6 ? 'CET-6' : '';
+      lines.push(
+        [
+          w.word,
+          w.cocaBestPosRank ?? '',
+          posStr,
+          w.band ?? '',
+          w.headword ?? '',
+          cetStr,
+          rec?.status ?? 'unrated',
+          (rec?.notes || '').replace(/[\r\n\t]+/g, ' '),
+        ].join('\t')
       );
-      return { entry, score, reason };
-    });
-
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return (b.entry.familyFrequency || 0) - (a.entry.familyFrequency || 0);
-    });
-    return scored.slice(0, batchSize);
-  }, [words, wordsMap, userRecordsMap, strategy, batchSize]);
-
-  const handleSaveBatchAsCollection = () => {
-    if (plannerCandidates.length === 0) return;
-    const strategyNames: Record<PresetStrategy, string> = {
-      cet4_core_1k_3k: 'CET-4 核心词批次',
-      cet4_remaining: 'CET-4 查漏补缺批次',
-      cet6_core_2k_5k: 'CET-6 核心进阶批次',
-      high_value_family_roots: '高价值大词族首词批次',
-      family_completion: '熟词族派生词补全批次',
-    };
-    const dateStr = new Date().toISOString().slice(5, 10);
-    const finalName =
-      batchName.trim() || `${strategyNames[strategy]} (${dateStr} · ${plannerCandidates.length}词)`;
-    const ids = plannerCandidates.map((c) => c.entry.id);
-    onCreateCollection({
-      name: finalName,
-      description: `由智能规划器生成，共 ${ids.length} 词`,
-      type: 'study_plan',
-      wordIds: ids,
-      planMetadata: {
-        targetCount: ids.length,
-        formulaDescription: strategyNames[strategy],
-        createdAt: new Date().toISOString(),
-      },
-    });
-
-    // Only update status if user explicitly opted in, and NEVER overwrite learning/mastered words!
-    if (markUnratedAsQueued) {
-      const unratedOnlyIds = ids.filter(
-        (id) => (userRecordsMap.get(id)?.status || 'unrated') === 'unrated'
-      );
-      if (unratedOnlyIds.length > 0) {
-        onBatchSetStatus(unratedOnlyIds, 'queued');
-      }
     }
-
-    setBatchName('');
-    setJustCreated(true);
-    setCenterMode('collection');
-    setTimeout(() => setJustCreated(false), 2000);
+    const blob = new Blob([lines.join('\n')], { type: 'text/tab-separated-values;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${namePrefix}-anki.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleCreateCustomCollection = (e: React.FormEvent) => {
@@ -258,6 +305,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
       name: newName.trim(),
       description: newDesc.trim() || '自定义静态词集',
       type: 'static',
+      entityType: 'mixed',
       wordIds: ids,
     });
     setShowNewModal(false);
@@ -266,687 +314,706 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     setNewWordsRaw('');
   };
 
-  const plannerFormControls = (
-    <div className="space-y-2.5">
-      <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-          选词策略 (已自动过滤基础虚词)
-        </label>
-        <select
-          value={strategy}
-          onChange={(e) => setStrategy(e.target.value as PresetStrategy)}
-          className="w-full px-2.5 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
-        >
-          <option value="cet4_core_1k_3k">CET-4 高频核心实词 (1k–3k 未掌握)</option>
-          <option value="cet6_core_2k_5k">CET-6 核心学术进阶 (2k–5k 未掌握)</option>
-          <option value="high_value_family_roots">高派生大词族首词 (1k–4k · 成员≥5)</option>
-          <option value="family_completion">已掌握词族的未学派生词补全</option>
-          <option value="cet4_remaining">CET-4 全量查漏补缺</option>
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-            批次词数
-          </label>
-          <select
-            value={batchSize}
-            onChange={(e) => setBatchSize(Number(e.target.value))}
-            className="w-full px-2 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none"
-          >
-            <option value={30}>30 词 / 批</option>
-            <option value={50}>50 词 / 批</option>
-            <option value={100}>100 词 / 批</option>
-            <option value={200}>200 词 / 批</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] mb-1">
-            批次名称 (选填)
-          </label>
-          <input
-            type="text"
-            value={batchName}
-            onChange={(e) => setBatchName(e.target.value)}
-            placeholder="自动按日期命名..."
-            className="w-full px-2 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
-          />
-        </div>
-      </div>
-
-      <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer select-none pt-0.5">
-        <input
-          type="checkbox"
-          checked={markUnratedAsQueued}
-          onChange={(e) => setMarkUnratedAsQueued(e.target.checked)}
-          className="rounded border-[var(--border-strong)]"
-        />
-        <span>同时将批次内「未评」词条标为「待学」（不覆盖在学/掌握）</span>
-      </label>
-
-      <button
-        type="button"
-        onClick={handleSaveBatchAsCollection}
-        disabled={plannerCandidates.length === 0}
-        className="w-full py-2 px-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-      >
-        {justCreated ? (
-          <>
-            <Check className="w-3.5 h-3.5" />
-            <span>已保存至词集列表</span>
-          </>
-        ) : (
-          <>保存为学习批次 ({plannerCandidates.length} 词)</>
-        )}
-      </button>
-    </div>
-  );
-
-  const collectionGridClass = isCompactCenter
-    ? 'grid grid-cols-[minmax(96px,1.4fr)_56px_78px_68px]'
-    : 'grid grid-cols-[minmax(115px,1.3fr)_60px_minmax(96px,1fr)_minmax(90px,0.9fr)_88px_74px]';
-
-  const plannerGridClass = isCompactCenter
-    ? 'grid grid-cols-[36px_minmax(100px,1.3fr)_58px_minmax(90px,1fr)_56px]'
-    : 'grid grid-cols-[42px_minmax(115px,1.2fr)_64px_minmax(105px,1fr)_minmax(110px,1fr)_64px]';
-
   return (
-    <div className="flex flex-col md:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
-      {/* Mobile Sub-View Switcher (<768px only) */}
-      <div className="md:hidden min-h-[42px] py-1.5 px-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-1 shrink-0">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
+      {/* Top Sub-Workspace Bar */}
+      <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           <button
             type="button"
-            onClick={() => setMobilePane('list')}
-            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
-              mobilePane === 'list'
-                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-                : 'text-[var(--text-muted)]'
+            onClick={() => setStudySubTab('planner')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+              studySubTab === 'planner'
+                ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
-            词集 ({collections.length})
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>多目标学习规划器 (Multi-Objective Planner)</span>
           </button>
+
           <button
             type="button"
-            onClick={() => setMobilePane('planner')}
-            className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap cursor-pointer ${
-              mobilePane === 'planner'
-                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--border-subtle)] font-semibold'
-                : 'text-[var(--text-muted)]'
+            onClick={() => setStudySubTab('collections')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+              studySubTab === 'collections'
+                ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
-            批次规划器
+            <BookMarked className="w-3.5 h-3.5" />
+            <span>词集与学习批次 ({collections.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStudySubTab('batch_sync')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+              studySubTab === 'batch_sync'
+                ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <ListChecks className="w-3.5 h-3.5" />
+            <span>批量导入与变更流水 ({activityLogs.length})</span>
           </button>
         </div>
-
-        {mobilePane === 'list' && (
-          <div className="flex items-center gap-1.5 min-w-0">
-            <select
-              value={activeCollection?.id || ''}
-              onChange={(e) => setSelectedCollectionId(e.target.value)}
-              aria-label="选择词集"
-              className="max-w-[150px] px-2 py-1 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] truncate"
-            >
-              {collections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setShowNewModal(true)}
-              className="p-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--accent-primary)] cursor-pointer shrink-0"
-              title="新建词集"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Zone 1: Left Collections Directory + Integrated Medium-Screen Planner Studio */}
-      <aside className="hidden md:flex md:w-[240px] lg:w-[270px] xl:w-[260px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full min-h-0">
-        <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-            词集与学习批次 ({collections.length})
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowNewModal(true)}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--accent-primary)] hover:bg-[var(--accent-soft)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            新建词集
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-          {collections.map((col) => {
-            const isSelected = activeCollection?.id === col.id && centerMode === 'collection';
-            const colWords =
-              col.type === 'dynamic' && col.filterCriteria
-                ? filterAndSortWords(
-                    words,
-                    userRecordsMap,
-                    col.filterCriteria,
-                    col.sortField || 'priority_weight_desc',
-                    familiesMap
-                  )
-                : col.wordIds
-                    .map((id) => wordsMap.get(id))
-                    .filter((w): w is LexiconWordItem => Boolean(w));
-            const total = colWords.length;
-            let mastered = 0;
-            for (const w of colWords) {
-              if (userRecordsMap.get(w.id)?.status === 'mastered') mastered++;
-            }
-            const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
-
-            return (
-              <div
-                key={col.id}
-                onClick={() => {
-                  setSelectedCollectionId(col.id);
-                  setCenterMode('collection');
-                }}
-                className={`p-3 cursor-pointer transition-colors ${
-                  isSelected
-                    ? 'bg-[var(--accent-soft)]'
-                    : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)]'
-                }`}
+      {/* ==================================================================== */}
+      {/* SUB-TAB 1: EXPLAINABLE MULTI-OBJECTIVE STUDY PLANNER                  */}
+      {/* ==================================================================== */}
+      {studySubTab === 'planner' && (
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+          {/* Left Strategy & 4-Objective Weight Controls */}
+          <aside className="w-full lg:w-[350px] xl:w-[380px] border-b lg:border-b-0 lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 overflow-y-auto space-y-4 shrink-0">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
+                1. 选择规划策略模式 (6 大预设策略)
+              </label>
+              <select
+                value={strategy}
+                onChange={(e) => handleStrategyChange(e.target.value as MultiObjectiveStrategyId)}
+                aria-label="学习规划策略"
+                className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-primary)]"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div
-                    className={`text-xs font-semibold leading-snug ${
-                      isSelected
-                        ? 'text-[var(--accent-primary)]'
-                        : 'text-[var(--text-primary)]'
-                    }`}
-                  >
-                    {col.type === 'dynamic' ? `动态 · ${col.name}` : col.name}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteCollection(col.id);
-                    }}
-                    className="text-[var(--text-muted)] hover:text-rose-500 p-0.5 shrink-0 cursor-pointer"
-                    title="删除词集"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
+                {Object.entries(STRATEGY_META).map(([key, meta]) => (
+                  <option key={key} value={key}>
+                    {meta.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                {STRATEGY_META[strategy].subtitle}
+              </p>
+            </div>
 
-                <div className="mt-2 flex items-center justify-between text-[11px] font-mono-tabular text-[var(--text-secondary)]">
-                  <span>{total.toLocaleString()} 词</span>
-                  <span>
-                    已掌握 {mastered} ({pct}%)
-                  </span>
+            {/* 4 Transparent Objective Weight Sliders */}
+            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  2. 四维评分透明权重调节
+                </span>
+                <span className="text-[10px] font-mono-tabular text-[var(--accent-primary)]">
+                  0–100 独立可解释分量
+                </span>
+              </div>
+
+              {[
+                {
+                  key: 'cocaWeight' as const,
+                  label: 'COCA 2020 当代词频价值',
+                  color: 'accent-blue-600',
+                },
+                {
+                  key: 'bncWeight' as const,
+                  label: 'BNC 词族频段与派生杠杆',
+                  color: 'accent-teal-600',
+                },
+                {
+                  key: 'cetWeight' as const,
+                  label: 'CET 四六级考纲相关性',
+                  color: 'accent-indigo-600',
+                },
+                {
+                  key: 'gapWeight' as const,
+                  label: '个人高频知识缺口紧迫度',
+                  color: 'accent-amber-600',
+                },
+              ].map((dim) => (
+                <div key={dim.key} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--text-secondary)]">{dim.label}</span>
+                    <span className="font-mono-tabular font-semibold text-[var(--text-primary)]">
+                      {weights[dim.key]}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={weights[dim.key]}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setWeights((prev) => ({ ...prev, [dim.key]: val }));
+                    }}
+                    className={`w-full h-1.5 rounded-lg cursor-pointer ${dim.color}`}
+                  />
                 </div>
-                <div className="mt-1 h-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 transition-all"
-                    style={{ width: `${pct}%` }}
+              ))}
+            </div>
+
+            {/* Batch Size, Pareto Filter, Save Controls */}
+            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
+                    目标批次容量
+                  </label>
+                  <select
+                    value={batchSize}
+                    onChange={(e) => setBatchSize(Number(e.target.value))}
+                    className="w-full px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-mono-tabular"
+                  >
+                    <option value={30}>30 词 / 批</option>
+                    <option value={50}>50 词 / 批</option>
+                    <option value={100}>100 词 / 批</option>
+                    <option value={200}>200 词 / 批</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
+                    批次名称
+                  </label>
+                  <input
+                    type="text"
+                    value={batchName}
+                    onChange={(e) => setBatchName(e.target.value)}
+                    placeholder="自动按策略与日期命名"
+                    className="w-full px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs"
                   />
                 </div>
               </div>
-            );
-          })}
-        </div>
 
-        {/* Integrated Next-Batch Planner on Medium Screens (768px - 1279px) */}
-        <div className="xl:hidden p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2 shrink-0">
-          <div className="flex items-center justify-between gap-1">
-            <h3 className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] flex items-center gap-1 truncate">
-              <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" />
-              <span className="truncate">学习规划器</span>
-            </h3>
-            <button
-              type="button"
-              onClick={() =>
-                setCenterMode((m) => (m === 'planner_preview' ? 'collection' : 'planner_preview'))
-              }
-              className={`text-[11px] font-medium px-2 py-0.5 rounded border cursor-pointer transition-colors shrink-0 ${
-                centerMode === 'planner_preview'
-                  ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
-                  : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {centerMode === 'planner_preview' ? '返回词集' : `预览 (${plannerCandidates.length})`}
-            </button>
-          </div>
-          {plannerFormControls}
-        </div>
-      </aside>
+              <label className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={onlyPareto}
+                    onChange={(e) => setOnlyPareto(e.target.checked)}
+                    className="rounded border-[var(--border-strong)]"
+                  />
+                  <span>仅保留帕累托前沿候选词 (Pareto Frontier)</span>
+                </div>
+                <span className="font-mono-tabular text-[11px] text-emerald-600 dark:text-emerald-400">
+                  {paretoCount} 词
+                </span>
+              </label>
 
-      {/* Zone 2: Center Main Table (Collection Word Table OR Medium-Screen Planner Preview) */}
-      <div
-        ref={centerRef}
-        className={`lexicon-table-container flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
-          mobilePane === 'list' ? 'flex' : 'hidden md:flex'
-        }`}
-      >
-        {centerMode === 'planner_preview' ? (
-          <>
-            <div className="px-3.5 sm:px-5 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2.5 shrink-0 bg-[var(--bg-surface)]">
-              <div className="min-w-0">
-                <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)] truncate">
-                  下一批候选实词优先级预览 ({plannerCandidates.length} 词)
+              <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={markUnratedAsQueued}
+                  onChange={(e) => setMarkUnratedAsQueued(e.target.checked)}
+                  className="rounded border-[var(--border-strong)]"
+                />
+                <span>保存时将批次内「未评」词条标为「待学」</span>
+              </label>
+
+              {(lockedIds.size > 0 || excludedIds.size > 0) && (
+                <div className="flex items-center justify-between text-[11px] font-mono-tabular text-[var(--text-muted)] pt-1 border-t border-[var(--border-subtle)]">
+                  <span>
+                    已锁定 {lockedIds.size} 词 · 已排除 {excludedIds.size} 词
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLockedIds(new Set());
+                      setExcludedIds(new Set());
+                    }}
+                    className="text-rose-600 hover:underline cursor-pointer"
+                  >
+                    清空干预
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSaveBatchAsCollection}
+                disabled={plannerCandidates.length === 0}
+                className="w-full py-2 px-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] disabled:opacity-40 text-white rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                {justCreated ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>已保存至学习词集</span>
+                  </>
+                ) : (
+                  <>生成并保存学习批次 ({plannerCandidates.length} 词)</>
+                )}
+              </button>
+            </div>
+          </aside>
+
+          {/* Right Candidate Preview Table with 4-Dimension Breakdown */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[var(--bg-surface)] overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div>
+                <h2 className="text-xs sm:text-sm font-bold text-[var(--text-primary)]">
+                  候选词多目标评分明细与帕累托前沿检视 ({plannerCandidates.length} 词)
                 </h2>
-                <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate">
-                  已按词频、四六级大纲权重与熟词族派生杠杆综合排序
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  点击任意词条可打开右侧研究抽屉；支持单行锁定保留或排除重算
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setCenterMode('collection')}
-                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer shrink-0"
+                onClick={() =>
+                  handleExportAnkiTsv(
+                    plannerCandidates.map((c) => c.word),
+                    `study-plan-${strategy}`
+                  )
+                }
+                className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer"
               >
-                返回当前词集
+                <Download className="w-3.5 h-3.5" />
+                <span>导出 Anki TSV</span>
               </button>
             </div>
 
-            {isCompactCenter ? (
-              <div className="flex items-center justify-between px-3.5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-                <span>候选词条 · 大纲与词族 · 推荐理由</span>
-                <span>辅助权重</span>
-              </div>
-            ) : (
-              <div
-                className={`${plannerGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
-              >
-                <div>序号</div>
-                <div>候选词条</div>
-                <div>大纲</div>
-                <div>词族与频段</div>
-                <div>推荐理由</div>
-                <div className="text-right">辅助权重</div>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
-              {plannerCandidates.map(({ entry, score, reason }, idx) =>
-                isCompactCenter ? (
-                  <div
-                    key={entry.id}
-                    onClick={() => onSelectWord(entry)}
-                    className="px-3.5 py-2.5 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors space-y-1 text-xs"
-                  >
-                    <div className="flex items-baseline justify-between gap-2 min-w-0">
-                      <div className="min-w-0 flex items-baseline gap-1.5">
-                        <span className="font-mono-tabular text-[11px] text-[var(--text-muted)] shrink-0">
-                          {idx + 1}.
-                        </span>
-                        <span
-                          translate="no"
-                          className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
-                        >
-                          {entry.word}
-                        </span>
-                        {entry.isCet4 ? (
-                          <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">
-                            CET-4
-                          </span>
-                        ) : entry.isCet6 ? (
-                          <span className="text-[11px] font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
-                            CET-6
-                          </span>
-                        ) : null}
-                        <span className="text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
-                          {entry.band ? `${entry.band} · ${entry.headword}` : ''}
-                        </span>
-                      </div>
-                      <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] shrink-0">
-                        权重 {score}
-                      </span>
-                    </div>
-                    <div className="pl-5 text-[11px] text-[var(--text-secondary)] truncate">
-                      {reason}
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    key={entry.id}
-                    onClick={() => onSelectWord(entry)}
-                    className={`${plannerGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors text-xs`}
-                  >
-                    <div className="font-mono-tabular text-[var(--text-muted)]">{idx + 1}.</div>
-                    <div
-                      translate="no"
-                      className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
-                    >
-                      {entry.word}
-                    </div>
-                    <div className="font-mono-tabular whitespace-nowrap">
-                      {entry.isCet4 ? (
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                          CET-4
-                        </span>
-                      ) : entry.isCet6 ? (
-                        <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
-                          CET-6
-                        </span>
-                      ) : (
-                        <span className="text-[var(--text-muted)]">—</span>
-                      )}
-                    </div>
-                    <div className="font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
-                      {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
-                    </div>
-                    <div className="text-[11px] text-[var(--text-secondary)] truncate pr-2">
-                      {reason}
-                    </div>
-                    <div className="text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
-                      {score}
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
-          </>
-        ) : activeCollection ? (
-          <>
-            <div className="px-3.5 sm:px-5 py-2.5 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 shrink-0 bg-[var(--bg-surface)]">
-              <div className="min-w-0">
-                <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)] truncate">
-                  {activeCollection.name}
-                </h2>
-                <p className="text-xs text-[var(--text-secondary)] truncate mt-0.5">
-                  {activeCollection.description} · 共 {activeCollectionWords.length.toLocaleString()} 词
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                {activeCollection.type === 'dynamic' && activeCollection.filterCriteria && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onApplyDynamicCollectionToExplore(
-                        activeCollection.filterCriteria || DEFAULT_FILTER_CRITERIA
-                      )
-                    }
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <Compass className="w-3.5 h-3.5" />
-                    <span>在词库中筛选</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onExportWordList(activeCollectionWords, activeCollection.name, 'txt')
-                  }
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>TXT</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onExportWordList(activeCollectionWords, activeCollection.name, 'csv')
-                  }
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>CSV</span>
-                </button>
-              </div>
+            <div className="grid grid-cols-[38px_minmax(125px,1.25fr)_100px_136px_minmax(150px,1.5fr)_68px] items-center px-4 py-2 bg-[var(--bg-subtle)]/60 border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+              <div>序号</div>
+              <div>候选词头与考纲</div>
+              <div>COCA · BNC</div>
+              <div>四维得分拆解 (0–100)</div>
+              <div>可解释推荐依据</div>
+              <div className="text-right">总分/干预</div>
             </div>
 
-            {/* Table Column Header */}
-            <div
-              className={`${collectionGridClass} items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0`}
-            >
-              <div>词条</div>
-              <div>大纲</div>
-              {!isCompactCenter && <div>词族与频段</div>}
-              {!isCompactCenter && <div>同族占比</div>}
-              <div className="text-right pr-2">词形频次</div>
-              <div className="text-right">状态</div>
-            </div>
-
-            {/* Paginated Rows (No 300-item hard cap!) */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-[var(--border-subtle)] min-h-0">
-              {pagedCollectionWords.map((entry) => {
-                const status = userRecordsMap.get(entry.id)?.status || 'unrated';
-                const statusMeta = LEARNING_STATUS_META[status];
-                const freqText = formatCompactFrequency(
-                  entry.formFrequency,
-                  entry.inBnc,
-                  entry.bncLinkedViaVariant
-                );
-                const roleAndShare = formatFamilyRoleAndShare(
-                  entry.isHeadword,
-                  entry.familyMemberCount,
-                  entry.formFrequency,
-                  entry.familyFrequency,
-                  entry.inBnc,
-                  entry.bncLinkedViaVariant
-                );
-
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+              {plannerCandidates.map((cand, idx) => {
+                const w = cand.word;
+                const isLocked = lockedIds.has(w.id);
                 return (
                   <div
-                    key={entry.id}
-                    onClick={() => onSelectWord(entry)}
-                    className={`${collectionGridClass} items-center px-3.5 sm:px-5 py-2 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors`}
+                    key={w.id}
+                    onClick={() => onSelectWord(w)}
+                    className={`grid grid-cols-[38px_minmax(125px,1.25fr)_100px_136px_minmax(150px,1.5fr)_68px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors ${
+                      isLocked ? 'bg-[var(--accent-soft)]/50' : ''
+                    }`}
                   >
-                    <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
-                      <span
-                        translate="no"
-                        className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
-                      >
-                        {entry.word}
-                      </span>
-                      {!entry.isHeadword && entry.headword && (
+                    <div className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                      {idx + 1}.
+                    </div>
+
+                    <div className="min-w-0 pr-2 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
                         <span
                           translate="no"
-                          className="text-[11px] text-[var(--text-muted)] truncate"
+                          className="font-serif-lexicon font-bold text-sm text-[var(--text-primary)] truncate"
                         >
-                          ← {entry.headword}
+                          {w.word}
                         </span>
-                      )}
-                    </div>
-
-                    <div className="text-xs font-mono-tabular whitespace-nowrap">
-                      {entry.isCet4 && entry.isCet6 ? (
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                          CET-4/6
-                        </span>
-                      ) : entry.isCet4 ? (
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                          CET-4
-                        </span>
-                      ) : entry.isCet6 ? (
-                        <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
-                          CET-6
-                        </span>
-                      ) : (
-                        <span className="text-[var(--text-muted)]">—</span>
-                      )}
-                    </div>
-
-                    {!isCompactCenter && (
-                      <div className="flex items-center gap-1 text-xs font-mono-tabular text-[var(--text-secondary)] truncate pr-2">
-                        {entry.band ? (
-                          <>
-                            <span className="font-semibold text-[var(--text-primary)]">
-                              {entry.band}
-                            </span>
-                            <span className="text-[var(--text-muted)]">·</span>
-                            <span translate="no" className="font-serif-lexicon truncate">
-                              {entry.headword}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-[var(--text-muted)]">大纲独立词</span>
+                        {cand.isParetoOptimal && (
+                          <span
+                            title="帕累托前沿最优解：在四维目标上不被任何其他候选词全面支配"
+                            className="px-1 py-0.2 rounded bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-[9px] font-mono-tabular font-semibold shrink-0"
+                          >
+                            Pareto
+                          </span>
                         )}
                       </div>
-                    )}
-
-                    {!isCompactCenter && (
-                      <div className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate pr-2">
-                        {roleAndShare}
+                      <div className="flex items-center gap-1 text-[10px] font-mono-tabular text-[var(--text-muted)]">
+                        {w.isCet4 && (
+                          <span className="text-teal-700 dark:text-teal-400 font-semibold">
+                            CET-4
+                          </span>
+                        )}
+                        {w.isCet6 && (
+                          <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
+                            {w.isCet6Only ? '★CET-6' : 'CET-6'}
+                          </span>
+                        )}
+                        {w.cocaPrimaryPos && (
+                          <span>{COCA_POS_META[w.cocaPrimaryPos]?.shortLabel}</span>
+                        )}
                       </div>
-                    )}
-
-                    <div
-                      className="text-right pr-2 font-mono-tabular text-xs whitespace-nowrap"
-                      title={
-                        entry.formFrequency !== null
-                          ? `词形实测频次: ${entry.formFrequency.toLocaleString()}${
-                              entry.familyFrequency !== null
-                                ? ` · 词族总频次: ${entry.familyFrequency.toLocaleString()}`
-                                : ''
-                            }`
-                          : '无独立频次记录'
-                      }
-                    >
-                      <span
-                        className={
-                          entry.formFrequency === 0 || entry.formFrequency === null
-                            ? 'text-[var(--text-muted)]'
-                            : 'font-medium text-[var(--text-primary)]'
-                        }
-                      >
-                        {freqText}
-                      </span>
                     </div>
 
-                    <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                      <select
-                        aria-label={`${entry.word} 学习状态`}
-                        value={status}
-                        onChange={(e) =>
-                          onStatusChange(
-                            entry.id,
-                            entry.word,
-                            e.target.value as LearningStatus
-                          )
+                    <div className="font-mono-tabular text-[11px] pr-2">
+                      {w.cocaBestPosRank ? (
+                        <div className="text-blue-600 dark:text-blue-400 font-semibold">
+                          COCA #{w.cocaBestPosRank}
+                        </div>
+                      ) : (
+                        <div className="text-[var(--text-muted)]">COCA —</div>
+                      )}
+                      <div className="text-[10px] text-[var(--text-secondary)]">
+                        {w.band ? `BNC ${w.band}` : '无族'}
+                      </div>
+                    </div>
+
+                    {/* 4-Dimension Mini Bars */}
+                    <div
+                      className="pr-3 space-y-1 font-mono-tabular text-[9px]"
+                      title={`COCA价值: ${cand.dimensions.cocaValue} | BNC词族: ${cand.dimensions.bncFamilyValue} | CET考纲: ${cand.dimensions.examRelevance} | 知识缺口: ${cand.dimensions.knowledgeGapValue}`}
+                    >
+                      <div className="grid grid-cols-4 gap-1">
+                        <div className="bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1 rounded text-center">
+                          C:{cand.dimensions.cocaValue}
+                        </div>
+                        <div className="bg-teal-500/15 text-teal-700 dark:text-teal-300 px-1 rounded text-center">
+                          B:{cand.dimensions.bncFamilyValue}
+                        </div>
+                        <div className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 px-1 rounded text-center">
+                          E:{cand.dimensions.examRelevance}
+                        </div>
+                        <div className="bg-amber-500/15 text-amber-700 dark:text-amber-300 px-1 rounded text-center">
+                          G:{cand.dimensions.knowledgeGapValue}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-[var(--text-secondary)] truncate pr-2">
+                      {cand.explainableReasons.join(' · ')}
+                    </div>
+
+                    <div
+                      className="flex items-center justify-end gap-1 font-mono-tabular"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="font-bold text-[var(--text-primary)] mr-1">
+                        {cand.compositeScore}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLockedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(w.id)) next.delete(w.id);
+                            else next.add(w.id);
+                            return next;
+                          })
                         }
-                        className={`appearance-none text-center px-1.5 py-0.5 rounded text-[11px] font-medium border cursor-pointer transition-colors ${statusMeta.badgeClass}`}
+                        title={isLocked ? '取消锁定' : '锁定保留在当前批次'}
+                        className={`p-1 rounded cursor-pointer ${
+                          isLocked
+                            ? 'text-[var(--accent-primary)] bg-[var(--accent-soft)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
                       >
-                        {ALL_STATUSES.map((st) => (
-                          <option key={st} value={st}>
-                            {LEARNING_STATUS_META[st].shortLabel}
-                          </option>
-                        ))}
-                      </select>
+                        {isLocked ? (
+                          <Lock className="w-3.5 h-3.5" />
+                        ) : (
+                          <Unlock className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExcludedIds((prev) => {
+                            const next = new Set(prev);
+                            next.add(w.id);
+                            return next;
+                          })
+                        }
+                        title="从候选池排除此词"
+                        className="p-1 rounded text-[var(--text-muted)] hover:text-rose-500 cursor-pointer"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-
-            {/* Pagination Footer when total > PAGE_SIZE */}
-            {totalPages > 1 && (
-              <div className="px-3.5 sm:px-5 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 text-xs shrink-0">
-                <span className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
-                  显示 {(safePage - 1) * PAGE_SIZE + 1}–
-                  {Math.min(safePage * PAGE_SIZE, activeCollectionWords.length)} / 共{' '}
-                  {activeCollectionWords.length.toLocaleString()} 词
-                </span>
-                <div className="flex items-center gap-1.5 font-mono-tabular">
-                  <button
-                    type="button"
-                    disabled={safePage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                    <span>上一页</span>
-                  </button>
-                  <span className="px-2 text-[11px] text-[var(--text-secondary)]">
-                    {safePage} / {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
-                  >
-                    <span>下一页</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        ) : null}
-      </div>
-
-      {/* Zone 3: Right Next-Batch Planner Studio (xl+ 340px, or mobile <768px when planner tab active) */}
-      <aside
-        className={`w-full xl:w-[340px] xl:border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 xl:flex-initial h-full min-h-0 overflow-hidden ${
-          mobilePane === 'planner' ? 'flex md:hidden xl:flex' : 'hidden xl:flex'
-        }`}
-      >
-        <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-3 shrink-0">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
-              下一批学习规划器
-            </h3>
-            <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">大纲与词族优先</span>
           </div>
-
-          {plannerFormControls}
         </div>
+      )}
 
-        {/* Candidate Preview List */}
-        <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
-          <span>候选实词预览 (Top {Math.min(plannerCandidates.length, 30)})</span>
-          <span>选词依据 · 辅助权重</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
-          {plannerCandidates.slice(0, 30).map(({ entry, score, reason }, idx) => (
-            <div
-              key={entry.id}
-              onClick={() => onSelectWord(entry)}
-              className="px-4 py-2 bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] cursor-pointer space-y-0.5 transition-colors"
-            >
-              <div className="flex items-baseline justify-between gap-2 min-w-0">
-                <div className="min-w-0 flex items-baseline gap-1.5">
-                  <span className="text-[11px] font-mono-tabular text-[var(--text-muted)] w-5 shrink-0">
-                    {idx + 1}.
-                  </span>
-                  <span
-                    translate="no"
-                    className="font-serif-lexicon font-semibold text-xs text-[var(--text-primary)] truncate"
-                  >
-                    {entry.word}
-                  </span>
-                  {entry.isCet4 ? (
-                    <span className="text-[10px] font-mono-tabular text-emerald-700 dark:text-emerald-400 font-semibold shrink-0">
-                      CET-4
-                    </span>
-                  ) : entry.isCet6 ? (
-                    <span className="text-[10px] font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
-                      CET-6
-                    </span>
-                  ) : null}
-                  <span className="text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
-                    {entry.band
-                      ? `${entry.band}${!entry.isHeadword && entry.headword ? ` · ←${entry.headword}` : ''}`
-                      : '—'}
-                  </span>
-                </div>
-                <span
-                  className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0"
-                  title="仅用于内部排序的综合参考权重"
-                >
-                  权重 {score}
-                </span>
-              </div>
-              <div className="pl-5 text-[11px] text-[var(--text-muted)] truncate">{reason}</div>
+      {/* ==================================================================== */}
+      {/* SUB-TAB 2: COLLECTIONS & STUDY PLANS                                  */}
+      {/* ==================================================================== */}
+      {studySubTab === 'collections' && (
+        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+          <aside className="w-full md:w-[270px] lg:w-[300px] border-b md:border-b-0 md:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-col shrink-0 min-h-0">
+            <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                词集与批次目录 ({collections.length})
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowNewModal(true)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--accent-primary)] hover:bg-[var(--accent-soft)] cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                新建词集
+              </button>
             </div>
-          ))}
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+              {collections.map((col) => {
+                const isSelected = activeCollection?.id === col.id;
+                const colWords =
+                  col.type === 'dynamic' && col.filterCriteria
+                    ? filterAndSortWords(
+                        words,
+                        userRecordsMap,
+                        col.filterCriteria,
+                        col.sortField || 'priority_weight_desc',
+                        familiesMap
+                      )
+                    : col.wordIds
+                        .map((id) => wordsMap.get(id))
+                        .filter((w): w is LexiconWordItem => Boolean(w));
+                const total = colWords.length;
+                let mastered = 0;
+                for (const w of colWords) {
+                  if (userRecordsMap.get(w.id)?.status === 'mastered') mastered++;
+                }
+                const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
+
+                return (
+                  <div
+                    key={col.id}
+                    onClick={() => {
+                      setSelectedCollectionId(col.id);
+                      setCurrentPage(1);
+                    }}
+                    className={`p-3 cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'bg-[var(--accent-soft)]'
+                        : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5 min-w-0">
+                        <div
+                          className={`text-xs font-semibold truncate ${
+                            isSelected
+                              ? 'text-[var(--accent-primary)]'
+                              : 'text-[var(--text-primary)]'
+                          }`}
+                        >
+                          {col.name}
+                        </div>
+                        <div className="text-[10px] font-mono-tabular text-[var(--text-muted)]">
+                          {col.type === 'dynamic'
+                            ? '动态规则词集'
+                            : col.type === 'study_plan'
+                              ? '规划批次'
+                              : '静态词集'}{' '}
+                          · 粒度: {col.entityType || 'headword'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteCollection(col.id);
+                        }}
+                        className="text-[var(--text-muted)] hover:text-rose-500 p-0.5 shrink-0 cursor-pointer"
+                        title="删除词集"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between text-[11px] font-mono-tabular text-[var(--text-secondary)]">
+                      <span>{total.toLocaleString()} 词</span>
+                      <span>
+                        掌握 {mastered} ({pct}%)
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* Center Collection Table */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[var(--bg-surface)] overflow-hidden">
+            {activeCollection ? (
+              <>
+                <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 shrink-0 bg-[var(--bg-surface)]">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-[var(--text-primary)] truncate">
+                      {activeCollection.name}
+                    </h2>
+                    <p className="text-xs text-[var(--text-secondary)] truncate mt-0.5">
+                      {activeCollection.description} · 共{' '}
+                      {activeCollectionWords.length.toLocaleString()} 词
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                    {activeCollection.type === 'dynamic' && activeCollection.filterCriteria && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onApplyDynamicCollectionToExplore(
+                            activeCollection.filterCriteria || DEFAULT_FILTER_CRITERIA
+                          )
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] cursor-pointer"
+                      >
+                        <Compass className="w-3.5 h-3.5" />
+                        <span>在探索视图打开</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleExportAnkiTsv(activeCollectionWords, activeCollection.name)
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Anki TSV</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onExportWordList(activeCollectionWords, activeCollection.name, 'csv')
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[var(--text-secondary)] rounded text-xs font-medium hover:text-[var(--text-primary)] cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>CSV</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[minmax(120px,1.3fr)_105px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+                  <div>词条</div>
+                  <div>COCA 排名 · 词性</div>
+                  <div>大纲</div>
+                  <div>BNC 词族</div>
+                  <div className="text-right pr-2">BNC 频次</div>
+                  <div className="text-right">状态</div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+                  {pagedCollectionWords.map((entry) => {
+                    const status = userRecordsMap.get(entry.id)?.status || 'unrated';
+                    const statusMeta = LEARNING_STATUS_META[status];
+                    const freqText = formatCompactFrequency(
+                      entry.formFrequency,
+                      entry.inBnc,
+                      entry.bncLinkedViaVariant
+                    );
+
+                    return (
+                      <div
+                        key={entry.id}
+                        onClick={() => onSelectWord(entry)}
+                        className="grid grid-cols-[minmax(120px,1.3fr)_105px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 py-2 hover:bg-[var(--bg-hover)] cursor-pointer text-xs"
+                      >
+                        <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                          <span
+                            translate="no"
+                            className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
+                          >
+                            {entry.word}
+                          </span>
+                        </div>
+
+                        <div className="font-mono-tabular text-[11px] pr-2">
+                          {entry.inCoca ? (
+                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                              #{entry.cocaBestPosRank}{' '}
+                              <span className="text-[10px] text-[var(--text-muted)]">
+                                ({entry.cocaPrimaryPos})
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-[var(--text-muted)]">—</span>
+                          )}
+                        </div>
+
+                        <div className="font-mono-tabular text-[11px]">
+                          {entry.isCet4 && entry.isCet6
+                            ? 'CET-4/6'
+                            : entry.isCet4
+                              ? 'CET-4'
+                              : entry.isCet6
+                                ? 'CET-6'
+                                : '—'}
+                        </div>
+
+                        <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] truncate pr-2">
+                          {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
+                        </div>
+
+                        <div className="text-right pr-2 font-mono-tabular text-[11px] text-[var(--text-secondary)]">
+                          {freqText}
+                        </div>
+
+                        <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            aria-label={`${entry.word} 学习状态`}
+                            value={status}
+                            onChange={(e) =>
+                              onStatusChange(
+                                entry.id,
+                                entry.word,
+                                e.target.value as LearningStatus
+                              )
+                            }
+                            className={`appearance-none text-center px-1.5 py-0.5 rounded text-[11px] font-medium border cursor-pointer ${statusMeta.badgeClass}`}
+                          >
+                            {ALL_STATUSES.map((st) => (
+                              <option key={st} value={st}>
+                                {LEARNING_STATUS_META[st].shortLabel}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between text-xs font-mono-tabular shrink-0">
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      第 {safePage} / {totalPages} 页（共{' '}
+                      {activeCollectionWords.length.toLocaleString()} 词）
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={safePage <= 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>上一页</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] disabled:opacity-40 cursor-pointer inline-flex items-center gap-0.5"
+                      >
+                        <span>下一页</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
         </div>
-      </aside>
+      )}
+
+      {/* ==================================================================== */}
+      {/* SUB-TAB 3: BATCH SYNC & ACTIVITY LEDGER                               */}
+      {/* ==================================================================== */}
+      {studySubTab === 'batch_sync' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <BatchAndActivityView
+            words={words}
+            wordsMap={wordsMap}
+            userRecordsMap={userRecordsMap}
+            activityLogs={activityLogs}
+            onExecuteBatchImport={onExecuteBatchImport}
+            onRollbackBatch={onRollbackBatch}
+            onUndoSingleLog={onUndoSingleLog}
+            onSelectWord={onSelectWord}
+            onExportLogsCsv={onExportLogsCsv}
+          />
+        </div>
+      )}
 
       {/* New Custom Collection Modal */}
       {showNewModal && (
@@ -957,10 +1024,10 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
           <form
             onSubmit={handleCreateCustomCollection}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-md shadow-xl overflow-hidden"
+            className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg shadow-xl overflow-hidden"
           >
             <div className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[var(--text-primary)]">新建自定义词集</h3>
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">新建自定义静态词集</h3>
               <button
                 type="button"
                 onClick={() => setShowNewModal(false)}
@@ -969,9 +1036,9 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                 关闭
               </button>
             </div>
-            <div className="p-5 space-y-3">
+            <div className="p-5 space-y-3 text-xs">
               <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">
                   词集名称
                 </label>
                 <input
@@ -979,49 +1046,49 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="如：阅读真题高频难词"
-                  className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                  placeholder="例如：经济学人阅读生词本"
+                  className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                  描述说明
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">
+                  词集说明
                 </label>
                 <input
                   type="text"
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="选填..."
-                  className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                  placeholder="选填描述…"
+                  className="w-full px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
-                  初始词表 (每行或逗号分隔)
+                <label className="block font-medium text-[var(--text-secondary)] mb-1">
+                  初始词表 (每行或逗号分隔一个单词)
                 </label>
                 <textarea
-                  rows={5}
+                  rows={4}
                   value={newWordsRaw}
                   onChange={(e) => setNewWordsRaw(e.target.value)}
-                  placeholder="粘贴单词或短语，自动匹配词库..."
-                  className="w-full p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-mono-tabular text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                  placeholder="work, ability, climate change..."
+                  className="w-full p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded font-mono-tabular"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewModal(false)}
-                  className="px-3 py-1.5 border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-secondary)] cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 bg-[var(--accent-primary)] text-white rounded text-xs font-semibold cursor-pointer"
-                >
-                  创建词集
-                </button>
-              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNewModal(false)}
+                className="px-3 py-1.5 rounded border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 rounded bg-[var(--accent-primary)] text-white text-xs font-semibold cursor-pointer"
+              >
+                创建词集
+              </button>
             </div>
           </form>
         </div>
