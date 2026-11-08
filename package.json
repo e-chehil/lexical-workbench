@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/data/parser.test.ts src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts",
-    "test:v2": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts",
+    "test": "tsx --test src/data/parser.test.ts src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts",
+    "test:v2": "tsx --test src/v2/tests/coca.test.ts src/v2/tests/engine.test.ts src/v2/tests/dto.test.ts src/v2/tests/store.test.ts",
     "audit:v2": "tsx scripts/audit-v2.ts"
   },
   "dependencies": {
@@ -37,6 +37,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
+    "fake-indexeddb": "^6.2.7",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
