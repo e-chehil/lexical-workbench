@@ -40,6 +40,7 @@ npm run dev        # http://localhost:3000
 | `src/v2/engine/` | `LexicalIndex`, query protocol, projection, alignment, `dto.ts` (row / form / family DTO builders for the worker and UI) |
 | `src/v2/learning/` | learning targets, effective status, coverage |
 | `src/v2/contracts.ts` | DTO / worker / store / planner contracts (types for upcoming tasks) |
+| `src/v2/store/` | user data store: `core.ts` (pure patch/undo), `dexieStore.ts` (`LexicalWorkbenchDB_v2`), `collections.ts`, `backup.ts` |
 | `src/v2/index.ts` | public surface — app code imports v2 only from here |
 | `src/v2/node/` | Node-only loaders for tests/scripts — never import in browser code |
 | `src/app/` | new v2 UI (created by tasks T04+) |

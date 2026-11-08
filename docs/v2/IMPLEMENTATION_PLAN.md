@@ -26,7 +26,7 @@ Shared-file rule: `src/v2/index.ts` and `src/v2/worker/registry.ts` are **append
 | --- | --- | --- | --- |
 | V2-T00 | Architecture freeze, COCA vertical slice, audit (this round) | — | done (2026-11-08) |
 | V2-T01 | Engine DTO builders (rows, form detail, family detail) | — | done (2026-11-08, 9fa4692) |
-| V2-T02 | User data store (Dexie v2) + pure learning store core | — | todo |
+| V2-T02 | User data store (Dexie v2) + pure learning store core | — | done (2026-11-08, 0d67e94) |
 | V2-T03 | Engine worker, browser loader, RPC client | T01 | todo |
 | V2-T04 | App shell, routing codec, providers, global search | T02, T03 | todo |
 | V2-T05 | Explore workspace | T04 | todo |
@@ -100,7 +100,7 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 
 ## V2-T02 — User data store
 
-- **Status**: todo
+- **Status**: done (2026-11-08, 0d67e94)
 - **Goal**: Persist learning records, events and collections in `LexicalWorkbenchDB_v2`, implementing
   `LearningStore` and collection CRUD, with a pure core testable in Node.
 - **Depends on**: —
@@ -129,6 +129,29 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 - **Acceptance**: tests pass; lint/test/build green.
 - **Boundaries**: do not import legacy `src/db/*`; do not change learning statuses or target shapes.
 - **Report**: schema, transaction strategy, test list.
+- **Done (2026-11-08)**: `src/v2/store/core.ts` (pure: `applyPatch`, `undoEvents`, `nextBatchId`,
+  `dedupeTargets`, `isTargetRef`, `compareEventsNewestFirst`), `dexieStore.ts`
+  (`LexicalWorkbenchDB` + `DexieLearningStore`), `collections.ts` (pure builders + `DexieCollections`),
+  `backup.ts` (`exportBackup` / `parseBackup` / `validatePayload` / `importBackup` /
+  `restoreFromJson`); 25 tests in `src/v2/tests/store.test.ts`; devDependency `fake-indexeddb`.
+  Schema is exactly ARCHITECTURE §8.2 (`learningRecords`, `learningEvents`, `collections`,
+  `customSources`, `settings`), version 1, database `LexicalWorkbenchDB_v2`, v1 not migrated.
+  Decisions where the contract was silent: (1) `applyPatch` returns the *same* record object when
+  nothing changed and `apply` then writes nothing, so repeated clicks do not churn `updatedAt`;
+  (2) tags are compared and stored as an ordered list (order is part of the value);
+  (3) `undoEvents` appends one `revert` event per affected target with the diff of changed field
+  groups — a revert that deletes a record has `before` = all fields and `after = {}` — and its
+  events use the batch id `revert:<batchId>`, so the original batch stays single-valued;
+  (4) a batch event whose record has since been removed elsewhere is reported in
+  `UndoPlan.skipped` instead of recreating it with a invented `createdAt`;
+  (5) `events()` defaults to the newest 200 and treats `since` as inclusive;
+  (6) `importBackup` validates the payload through the same validator as `parseBackup`, before the
+  transaction, and the store cache must be refreshed with `store.load()` afterwards;
+  (7) collections never cascade from learning records: deleting/undoing a record leaves stored
+  targets in place (ADR-011), and `DexieCollections` reads the table fresh (no cache).
+  Transaction strategy: one `rw` over records + events per `apply`/`undoBatch`; one `rw` over the
+  three user tables for the replace-mode import. Cost on fake-indexeddb is not representative of
+  the browser; the table sizes are user-scale (thousands), not source-scale.
 
 ## V2-T03 — Engine worker, loader, RPC client
 
@@ -336,4 +359,4 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
 | `LexicalEngineApi` | T03 | additive methods in T08 (`insights`), T13 (`setCustomSource`) |
 | `LearningStore`, `Collection` | T02 | none after T02 |
 
-NEXT_TASK: V2-T02
+NEXT_TASK: V2-T03
