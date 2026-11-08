@@ -1,5 +1,5 @@
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import Root from './app/Root.tsx';
 import './index.css';
 
 // Safely register PWA service worker in production using Vite's BASE_URL (supports '/' and '/lexical-workbench/')
@@ -18,4 +18,4 @@ if (import.meta.env.PROD && typeof window !== 'undefined' && 'serviceWorker' in 
   });
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<Root />);
