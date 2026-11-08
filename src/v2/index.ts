@@ -6,6 +6,7 @@ export { parseCocaJson, parseCocaData } from './sources/cocaAdapter.ts';
 export { parseBncFamilies } from './sources/bncAdapter.ts';
 export { parseCetSyllabus } from './sources/cetAdapter.ts';
 export { LexicalIndex, buildLexicalIndex, type SourceSnapshots } from './engine/lexicalIndex.ts';
+export { metricCell, buildRows, buildFormDetail, buildFamilyDetail, rowBadges } from './engine/dto.ts';
 export * from './engine/query.ts';
 export * from './engine/alignment.ts';
 export * from './learning/model.ts';
