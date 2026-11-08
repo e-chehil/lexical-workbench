@@ -286,10 +286,12 @@ Parallel-safe groups: {T01, T02} → {T03} → {T04, T08, T09} → {T05, T06} �
   gives `{client,status,ready,error,retry}`; the Explore page should render
   `WorkspacePlaceholder`'s slot, and `DetailHost`/`RefDetail` are placeholders T06 replaces.
   Search uses `rows()` (labels) — reuse `useSearch` instead of querying per component.
-- **Open issue (not T04 scope)**: the browser loader accepts any HTTP 200 body, so a missing
-  *text* source served as the SPA fallback HTML would be parsed as one bogus CET entry; the JSON
-  source fails loudly. A content-type/first-line guard belongs in `worker/loadBrowser.ts` (T03
-  file) and is recorded here rather than patched from an app task.
+- **Open issue (fixed after T04)**: the browser loader accepted any HTTP 200 body, so a missing
+  *text* source served as the SPA fallback HTML was parsed as one bogus CET entry while the source
+  was reported as loaded. `worker/loadBrowser.ts` now checks each payload's *content* shape
+  (`assertSourcePayload`: HTML page detection plus a one-line structural probe per source) and
+  raises `SourceFormatError` naming the source, so the app keeps its previous data. Covered by
+  tests for BNC and CET on an HTTP 200 HTML body and for the three real files being accepted.
 
 ## V2-T05 — Explore workspace
 

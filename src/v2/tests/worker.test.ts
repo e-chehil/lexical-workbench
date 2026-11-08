@@ -18,8 +18,10 @@ import { assembleHandlers, ENGINE_METHODS, isControlMethod, isEngineMethod } fro
 import {
   SOURCE_FILES,
   SourceLoadError,
+  assertSourcePayload,
   buildIndexFromTexts,
   loadSourceTexts,
+  looksLikeHtml,
   resolvePublicUrl,
   type SourceTexts,
 } from '../worker/loadBrowser.ts';
@@ -278,6 +280,96 @@ test('loadBrowser: overrides skip the fetch, and load failures are coded per sou
   await expectLoadError(Promise.resolve().then(() => buildIndexFromTexts({})), 'no_sources');
 });
 
+/** Minimal but structurally valid sample of each source (validation-path fixtures). */
+const MINIMAL_COCA = '[{"headword":"work","content":[{"PoS":"noun","Rank":"1","Freq":"10"}]}]';
+const MINIMAL_BNC = 'List \tHeadword \tRelated forms\tTotal frequency\n1k\twork\t"work (10)"\t10\n';
+const MINIMAL_CET = 'abandon\n';
+
+/** Exactly what a static host answers for a missing file under `navigateFallback: index.html`. */
+const SPA_FALLBACK_HTML = `<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8" /><script type="module" src="/assets/index.js"></script></head>
+  <body><div id="root"></div></body>
+</html>`;
+
+/** Minimal, structurally valid text per source: the control case for "not rejected". */
+const MINIMAL_TEXTS: Record<SourceId, string> = {
+  coca2020: MINIMAL_COCA,
+  bnc25k: MINIMAL_BNC,
+  cet2016: MINIMAL_CET,
+};
+
+test('loadBrowser: an HTTP 200 HTML fallback page is refused for BNC and CET, never parsed as data', async () => {
+  // Control: the same pipeline with valid texts builds all three sources.
+  const healthy = buildIndexFromTexts(MINIMAL_TEXTS);
+  assert.deepEqual(healthy.sources, ['coca2020', 'bnc25k', 'cet2016']);
+
+  for (const broken of ['bnc25k', 'cet2016'] as const) {
+    // The reported failure: one data file answers 200 with the SPA shell, the others are fine.
+    const respond = (url: string): Response => {
+      const sourceId = (Object.keys(SOURCE_FILES) as SourceId[]).find((id) => url.endsWith(SOURCE_FILES[id]))!;
+      const body = sourceId === broken ? SPA_FALLBACK_HTML : MINIMAL_TEXTS[sourceId];
+      return new Response(body, { status: 200, headers: { 'content-type': sourceId === broken ? 'text/html' : 'text/plain' } });
+    };
+    const texts = await loadSourceTexts({ fetcher: respond as unknown as typeof fetch });
+    assert.ok(looksLikeHtml(texts[broken]), `${broken}: the fetched body really is the HTML page`);
+
+    assert.throws(
+      () => buildIndexFromTexts(texts),
+      (e: unknown) => {
+        assert.ok(e instanceof Error, `${broken}: an error must be raised`);
+        assert.equal(e.name, 'SourceFormatError');
+        assert.equal((e as { source?: string }).source, broken, 'the error names the offending source');
+        assert.match(e.message, /HTML page/i);
+        return true;
+      },
+      `${broken}: an HTML fallback page must not be reported as a loaded source`
+    );
+  }
+});
+
+test('loadBrowser: a per-source shape check rejects substituted payloads but keeps real files', async () => {
+  // Real files pass the guard (no false rejection), so the accepted-set is not narrowed.
+  for (const [sourceId, file] of [
+    ['coca2020', DATA_FILES.coca2020],
+    ['bnc25k', DATA_FILES.bnc25k],
+    ['cet2016', DATA_FILES.cet2016],
+  ] as [SourceId, string][]) {
+    assert.doesNotThrow(() => assertSourcePayload(sourceId, readDataFile(file)), `${sourceId} real file`);
+  }
+  for (const [sourceId, text] of [
+    ['coca2020', MINIMAL_COCA],
+    ['bnc25k', MINIMAL_BNC],
+    ['cet2016', MINIMAL_CET],
+  ] as [SourceId, string][]) {
+    assert.doesNotThrow(() => assertSourcePayload(sourceId, text), `${sourceId} minimal valid sample`);
+  }
+
+  // HTML is refused for every source, with the source id preserved in the message.
+  for (const sourceId of ['coca2020', 'bnc25k', 'cet2016'] as const) {
+    assert.throws(
+      () => assertSourcePayload(sourceId, SPA_FALLBACK_HTML),
+      (e: unknown) => e instanceof Error && e.message.startsWith(`[${sourceId}]`) && /HTML page/i.test(e.message)
+    );
+  }
+
+  // Other sources' formats are refused too (a 200 alone proves nothing).
+  assert.throws(
+    () => assertSourcePayload('bnc25k', MINIMAL_COCA),
+    (e: unknown) => e instanceof Error && e.name === 'SourceFormatError' && /band-prefixed/i.test(e.message)
+  );
+  assert.throws(
+    () => assertSourcePayload('coca2020', MINIMAL_BNC),
+    (e: unknown) => e instanceof Error && e.name === 'SourceFormatError' && /JSON array/i.test(e.message)
+  );
+
+  // A payload that merely yields no units still fails at the adapter boundary (unchanged behaviour).
+  assert.throws(
+    () => buildIndexFromTexts({ coca2020: '[]' }),
+    (e: unknown) => e instanceof Error && e.name === 'SourceFormatError' && /no valid units/.test(e.message)
+  );
+});
+
 test('loadBrowser: an unusable payload throws SourceFormatError instead of half-building', () => {
   // Wrong root shape → the adapter refuses the payload.
   assert.throws(
@@ -413,6 +505,16 @@ test('runtime: setCustomSource rebuilds, keeps learning state, and never loses t
   const emptyText = await runtime.handle({ id: 10, method: 'setCustomSource', args: ['cet2016', '   '] });
   assert.ok(emptyText.ok === false && emptyText.error.code === 'invalid_custom_source');
   assert.equal(builds, 3, 'failed rebuild + invalid arguments did not add builds beyond the attempt');
+
+  // A custom payload that is an HTML page (SPA fallback) is refused by the shape guard, and the
+  // previous index keeps serving: `setCustomSource` must not report success for it.
+  const htmlCustom = await runtime.handle({ id: 11, method: 'setCustomSource', args: ['cet2016', SPA_FALLBACK_HTML] });
+  assert.equal(htmlCustom.ok, false);
+  assert.ok(htmlCustom.ok === false && htmlCustom.error.code === 'source_format_error');
+  assert.match(htmlCustom.ok === false ? htmlCustom.error.message : '', /^\[cet2016\].*HTML page/i);
+  const stillTwo = await runtime.handle({ id: 12, method: 'query', args: [{ kind: 'cet_entry' }] });
+  assert.ok(stillTwo.ok && (stillTwo.value as { total: number }).total === 2, 'the rejected payload did not replace the index');
+  assert.equal(builds, 4, 'the HTML attempt is parsed and refused, so it counts as one build');
 });
 
 test('attachEngineWorker: a worker scope receives responses for every request', async () => {
