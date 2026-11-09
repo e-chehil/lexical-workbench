@@ -9,7 +9,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '未评',
     description: '尚未人工处理（默认状态）',
     badgeClass:
-      'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700',
+      'bg-slate-500/10 text-slate-700 border-slate-500/20 dark:bg-slate-400/10 dark:text-slate-300 dark:border-slate-400/20',
     dotClass: 'bg-slate-400 dark:bg-slate-500',
   },
   queued: {
@@ -17,7 +17,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '待学',
     description: '已筛出，准备放入近期学习计划',
     badgeClass:
-      'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/70',
+      'bg-amber-500/12 text-amber-800 border-amber-500/25 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-400/25',
     dotClass: 'bg-amber-500',
   },
   learning: {
@@ -25,7 +25,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '在学',
     description: '正在其他词汇书、背单词软件或阅读中重点接触',
     badgeClass:
-      'bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/70',
+      'bg-blue-500/12 text-blue-700 border-blue-500/25 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-400/25',
     dotClass: 'bg-blue-600 dark:bg-blue-400',
   },
   mastered: {
@@ -33,7 +33,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '掌握',
     description: '已认识并基本掌握',
     badgeClass:
-      'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/70',
+      'bg-emerald-500/12 text-emerald-800 border-emerald-500/25 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-400/25',
     dotClass: 'bg-emerald-600 dark:bg-emerald-400',
   },
   deferred: {
@@ -41,7 +41,7 @@ export const LEARNING_STATUS_META: Record<
     shortLabel: '暂缓',
     description: '当前不优先学习，例如专有名词、超低频词或暂不需要的词形',
     badgeClass:
-      'bg-purple-50 text-purple-800 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/70',
+      'bg-purple-500/12 text-purple-800 border-purple-500/25 dark:bg-purple-500/15 dark:text-purple-300 dark:border-purple-400/25',
     dotClass: 'bg-purple-500',
   },
 };
@@ -83,7 +83,7 @@ export const COCA_POS_META: Record<
     abbr: 'n.',
     category: 'content',
     badgeClass:
-      'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/70',
+      'bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
   },
   verb: {
     zh: '动词 (verb)',
@@ -93,7 +93,7 @@ export const COCA_POS_META: Record<
     abbr: 'v.',
     category: 'content',
     badgeClass:
-      'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/70',
+      'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
   },
   adjective: {
     zh: '形容词 (adjective)',
@@ -103,7 +103,7 @@ export const COCA_POS_META: Record<
     abbr: 'adj.',
     category: 'content',
     badgeClass:
-      'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/70',
+      'bg-amber-500/12 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
   },
   adverb: {
     zh: '副词 (adverb)',
@@ -113,7 +113,7 @@ export const COCA_POS_META: Record<
     abbr: 'adv.',
     category: 'content',
     badgeClass:
-      'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/70',
+      'bg-purple-500/10 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300',
   },
   number: {
     zh: '数词 (number)',
@@ -123,7 +123,7 @@ export const COCA_POS_META: Record<
     abbr: 'num.',
     category: 'content',
     badgeClass:
-      'bg-cyan-50 text-cyan-700 border-cyan-200 dark:bg-cyan-950/60 dark:text-cyan-300 dark:border-cyan-800/70',
+      'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300',
   },
   interjection: {
     zh: '感叹词 (interjection)',
@@ -133,7 +133,7 @@ export const COCA_POS_META: Record<
     abbr: 'interj.',
     category: 'function',
     badgeClass:
-      'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/70',
+      'bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
   },
   preposition: {
     zh: '介词 (preposition)',
@@ -143,7 +143,7 @@ export const COCA_POS_META: Record<
     abbr: 'prep.',
     category: 'function',
     badgeClass:
-      'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/70',
+      'bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300',
   },
   pronoun: {
     zh: '代词 (pronoun)',
@@ -153,7 +153,7 @@ export const COCA_POS_META: Record<
     abbr: 'pron.',
     category: 'function',
     badgeClass:
-      'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70',
+      'bg-teal-500/10 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300',
   },
   conjunction: {
     zh: '连词 (conjunction)',
@@ -163,7 +163,7 @@ export const COCA_POS_META: Record<
     abbr: 'conj.',
     category: 'function',
     badgeClass:
-      'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-800/70',
+      'bg-orange-500/10 text-orange-800 dark:bg-orange-500/15 dark:text-orange-300',
   },
   determiner: {
     zh: '限定词 (determiner)',
@@ -173,7 +173,7 @@ export const COCA_POS_META: Record<
     abbr: 'det.',
     category: 'function',
     badgeClass:
-      'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/70',
+      'bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
   },
   article: {
     zh: '冠词/物主限定词 (article)',
@@ -183,7 +183,7 @@ export const COCA_POS_META: Record<
     abbr: 'art.',
     category: 'function',
     badgeClass:
-      'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/70',
+      'bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300',
   },
   negation: {
     zh: '否定词 (negation)',
@@ -193,7 +193,7 @@ export const COCA_POS_META: Record<
     abbr: 'neg.',
     category: 'function',
     badgeClass:
-      'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/70',
+      'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
   },
   '+infinitive': {
     zh: '不定式标记 (+infinitive)',
@@ -203,7 +203,7 @@ export const COCA_POS_META: Record<
     abbr: '+inf.',
     category: 'function',
     badgeClass:
-      'bg-lime-50 text-lime-700 border-lime-200 dark:bg-lime-950/60 dark:text-lime-300 dark:border-lime-800/70',
+      'bg-lime-500/12 text-lime-800 dark:bg-lime-500/15 dark:text-lime-300',
   },
   existential: {
     zh: '存在句标记 (existential)',
@@ -213,7 +213,7 @@ export const COCA_POS_META: Record<
     abbr: 'exist.',
     category: 'function',
     badgeClass:
-      'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200 dark:bg-fuchsia-950/60 dark:text-fuchsia-300 dark:border-fuchsia-800/70',
+      'bg-fuchsia-500/10 text-fuchsia-700 dark:bg-fuchsia-500/15 dark:text-fuchsia-300',
   },
 };
 
@@ -235,7 +235,7 @@ export function getCocaPosMeta(pos: string): {
       abbr: pos,
       category: 'content',
       badgeClass:
-        'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+        'bg-slate-500/10 text-slate-700 dark:bg-slate-400/10 dark:text-slate-300',
     }
   );
 }

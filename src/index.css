@@ -1,11 +1,13 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
+    color-scheme: light;
     --bg-canvas: #F8FAFC;
     --bg-surface: #FFFFFF;
     --bg-elevated: #F1F5F9;
-    --bg-subtle: #E2E8F0;
+    --bg-subtle: #F1F5F9;
     --bg-hover: #F1F5F9;
     --text-primary: #0F172A;
     --text-secondary: #334155;
@@ -15,17 +17,18 @@
     --border-strong: #CBD5E1;
     --accent-primary: #2563EB;
     --accent-hover: #1D4ED8;
-    --accent-soft: #EFF6FF;
-    --accent-primary-soft: #EFF6FF;
+    --accent-soft: rgba(37, 99, 235, 0.08);
+    --accent-primary-soft: rgba(37, 99, 235, 0.08);
   }
 
   .dark {
+    color-scheme: dark;
     --bg-canvas: #090D16;
-    --bg-surface: #111827;
-    --bg-elevated: #1E293B;
-    --bg-subtle: #1E293B;
-    --bg-hover: rgba(30, 41, 59, 0.7);
-    --text-primary: #F8FAFC;
+    --bg-surface: #0F172A;
+    --bg-elevated: #162033;
+    --bg-subtle: #1A2333;
+    --bg-hover: rgba(30, 41, 59, 0.72);
+    --text-primary: #F1F5F9;
     --text-secondary: #CBD5E1;
     --text-muted: #94A3B8;
     --border-subtle: #1E293B;
@@ -33,23 +36,71 @@
     --border-strong: #334155;
     --accent-primary: #3B82F6;
     --accent-hover: #2563EB;
-    --accent-soft: rgba(59, 130, 246, 0.14);
-    --accent-primary-soft: rgba(59, 130, 246, 0.14);
+    --accent-soft: rgba(59, 130, 246, 0.15);
+    --accent-primary-soft: rgba(59, 130, 246, 0.15);
+  }
+
+  @media (pointer: fine) {
+    html {
+      overscroll-behavior: none;
+    }
   }
 
   html,
   body {
     background-color: var(--bg-canvas);
     color: var(--text-primary);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
   }
+
+  button,
+  a,
+  select,
+  input,
+  textarea,
+  label,
+  [role="button"],
+  [role="checkbox"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  [role="button"]:focus-visible,
+  [role="checkbox"]:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -1px;
+  }
+
+  select {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  select option,
+  select optgroup {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    scroll-margin-top: 3.5rem;
+  }
 }
 
 .font-serif-lexicon {
-  font-family: 'Source Serif 4', 'Newsreader', Georgia, Cambria, "Times New Roman", Times, serif;
+  font-family: 'Fraunces', 'Source Serif 4', Georgia, Cambria, "Times New Roman", Times, serif;
 }
 
 .font-mono-tabular,
@@ -141,7 +192,7 @@ input[type="range"].lw-range-slider:hover::-webkit-slider-thumb {
 }
 
 input[type="range"].lw-range-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
 }
 
 input[type="range"].lw-range-slider::-moz-range-track {
@@ -161,3 +212,13 @@ input[type="range"].lw-range-slider::-moz-range-thumb {
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

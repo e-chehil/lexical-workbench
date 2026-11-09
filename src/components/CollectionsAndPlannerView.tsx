@@ -592,11 +592,11 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
           {/* Left Strategy & 4-Objective Weight Controls */}
           <aside
-            className={`w-full lg:w-[340px] xl:w-[370px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 overflow-y-auto space-y-4 shrink-0 ${
+            className={`w-full lg:w-[340px] xl:w-[370px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] overflow-y-auto p-3.5 sm:p-4 space-y-3.5 shrink-0 ${
               plannerMobilePane === 'config' ? 'flex-1 lg:flex-none block' : 'hidden lg:block'
             }`}
           >
-            <div>
+            <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                   1. 选择规划策略模式 (6 大策略池)
@@ -611,7 +611,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                 value={strategy}
                 onChange={(e) => handleStrategyChange(e.target.value as MultiObjectiveStrategyId)}
                 aria-label="学习规划策略"
-                className="w-full px-3 py-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-primary)]"
+                className="w-full px-3 py-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-semibold text-[var(--text-primary)]"
               >
                 {Object.entries(STRATEGY_META).map(([key, meta]) => (
                   <option key={key} value={key}>
@@ -625,7 +625,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             </div>
 
             {/* 4 Transparent Objective Weight Sliders */}
-            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
+            <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-primary)] block">
@@ -641,7 +641,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   title="重置为当前策略默认权重"
                   className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-hover)] text-[10px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer shrink-0"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3 h-3" aria-hidden="true" />
                   <span>重置权重</span>
                 </button>
               </div>
@@ -650,28 +650,28 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
               <div className="space-y-1.5">
                 <div className="h-2 w-full rounded-full overflow-hidden bg-[var(--bg-subtle)] flex p-0.5 gap-0.5">
                   <div
-                    className="h-full bg-blue-600 rounded-l-full transition-all duration-150"
+                    className="h-full bg-blue-600 rounded-l-full transition-[width] duration-150"
                     style={{
                       width: `${Math.round((weights.cocaWeight / totalWeightSum) * 100)}%`,
                     }}
                     title={`COCA 词频占比 ${Math.round((weights.cocaWeight / totalWeightSum) * 100)}%`}
                   />
                   <div
-                    className="h-full bg-teal-600 transition-all duration-150"
+                    className="h-full bg-teal-600 transition-[width] duration-150"
                     style={{
                       width: `${Math.round((weights.bncWeight / totalWeightSum) * 100)}%`,
                     }}
                     title={`BNC 词族占比 ${Math.round((weights.bncWeight / totalWeightSum) * 100)}%`}
                   />
                   <div
-                    className="h-full bg-indigo-600 transition-all duration-150"
+                    className="h-full bg-indigo-600 transition-[width] duration-150"
                     style={{
                       width: `${Math.round((weights.cetWeight / totalWeightSum) * 100)}%`,
                     }}
                     title={`CET 考纲占比 ${Math.round((weights.cetWeight / totalWeightSum) * 100)}%`}
                   />
                   <div
-                    className="h-full bg-amber-500 rounded-r-full transition-all duration-150"
+                    className="h-full bg-amber-500 rounded-r-full transition-[width] duration-150"
                     style={{
                       width: `${Math.round((weights.gapWeight / totalWeightSum) * 100)}%`,
                     }}
@@ -694,7 +694,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                 </div>
               </div>
 
-              <div className="space-y-3 pt-1 border-t border-[var(--border-subtle)]">
+              <div className="space-y-3 pt-2 border-t border-[var(--border-subtle)]">
                 {[
                   {
                     key: 'cocaWeight' as const,
@@ -759,7 +759,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       <div className="relative h-5 flex items-center">
                         <div className="absolute inset-x-0 h-1.5 rounded-full bg-[var(--bg-subtle)] overflow-hidden pointer-events-none">
                           <div
-                            className={`h-full rounded-full transition-all duration-100 ${dim.fillClass}`}
+                            className={`h-full rounded-full transition-[width] duration-100 ${dim.fillClass}`}
                             style={{ width: `${val}%` }}
                           />
                         </div>
@@ -785,7 +785,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             </div>
 
             {/* Batch Size, Pareto Filter, Save Controls */}
-            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
+            <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">
@@ -794,7 +794,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   <select
                     value={batchSize}
                     onChange={(e) => setBatchSize(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-mono-tabular"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-mono-tabular"
                   >
                     <option value={30}>30 词 / 批</option>
                     <option value={50}>50 词 / 批</option>
@@ -811,7 +811,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                     value={batchName}
                     onChange={(e) => setBatchName(e.target.value)}
                     placeholder="自动按策略与日期命名"
-                    className="w-full px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs"
                   />
                 </div>
               </div>
@@ -864,7 +864,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
               {saveError && (
                 <div className="p-2 rounded bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>{saveError}</span>
                 </div>
               )}
@@ -877,7 +877,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
               >
                 {justCreated ? (
                   <>
-                    <Check className="w-3.5 h-3.5" />
+                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>已保存至学习词集</span>
                   </>
                 ) : isSavingBatch ? (
@@ -988,7 +988,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
             <div className="flex-1 overflow-auto min-h-0">
               <div className="min-w-[540px] flex flex-col min-h-full">
-                <div className="grid grid-cols-[54px_minmax(105px,1.15fr)_88px_minmax(110px,1.25fr)_96px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] items-center px-4 py-2 bg-[var(--bg-subtle)]/60 border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] sticky top-0 z-10 backdrop-blur-xs">
+                <div className="grid grid-cols-[54px_minmax(105px,1.15fr)_88px_minmax(110px,1.25fr)_96px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] gap-x-2.5 items-center px-4 py-2 bg-[var(--bg-subtle)]/60 border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] sticky top-0 z-10 backdrop-blur-xs">
                   <div>锁定/序号</div>
                   <div>候选词条 · 考纲 · 词性</div>
                   <div>COCA · BNC</div>
@@ -1007,7 +1007,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                         key={w.id}
                         onClick={() => onSelectWord(w)}
                         onMouseEnter={() => handleLockRowMouseEnter(idx, w.id)}
-                        className={`grid grid-cols-[54px_minmax(105px,1.15fr)_88px_minmax(110px,1.25fr)_96px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors ${
+                        className={`grid grid-cols-[54px_minmax(105px,1.15fr)_88px_minmax(110px,1.25fr)_96px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] gap-x-2.5 items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors ${
                           isLocked ? 'bg-[var(--accent-soft)]/50' : ''
                         }`}
                       >
@@ -1275,8 +1275,9 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                         }}
                         className="text-[var(--text-muted)] hover:text-rose-500 p-0.5 shrink-0 cursor-pointer"
                         title="删除词集"
+                        aria-label={`删除词集 ${col.name}`}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </div>
 
@@ -1288,7 +1289,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                     </div>
                     <div className="mt-1 h-1 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500 transition-all"
+                        className="h-full bg-emerald-500 transition-[width]"
                         style={{ width: `${stats.pct}%` }}
                       />
                     </div>
@@ -1353,7 +1354,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
 
                 <div className="flex-1 overflow-auto min-h-0">
                   <div className="min-w-[460px] flex flex-col min-h-full">
-                    <div className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] sticky top-0 z-10">
+                    <div className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] gap-x-2.5 items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] sticky top-0 z-10">
                       <div>词条</div>
                       <div>COCA 排名 · 词性</div>
                       <div className="hidden sm:block">大纲</div>
@@ -1376,7 +1377,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                           <div
                             key={entry.id}
                             onClick={() => onSelectWord(entry)}
-                            className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 py-2 hover:bg-[var(--bg-hover)] cursor-pointer text-xs"
+                            className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] gap-x-2.5 items-center px-4 py-2 hover:bg-[var(--bg-hover)] cursor-pointer text-xs transition-colors"
                           >
                             <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
                               <span
@@ -1569,7 +1570,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   rows={4}
                   value={newWordsRaw}
                   onChange={(e) => setNewWordsRaw(e.target.value)}
-                  placeholder="work, ability, climate change..."
+                  placeholder="work, ability, climate change…"
                   className="w-full p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded font-mono-tabular"
                 />
               </div>

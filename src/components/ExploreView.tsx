@@ -155,7 +155,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   }, []);
 
   const isCompactCardLayout = containerWidth < 560;
-  const isMediumTableLayout = containerWidth >= 560 && containerWidth < 840;
+  const isMediumTableLayout = containerWidth >= 560 && containerWidth < 920;
 
   // Dynamic source filter labels computed from loaded allWords (never hardcoded stale numbers)
   const sourceFilterOptions = useMemo(() => {
@@ -427,23 +427,23 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
   // Dynamic CSS Grid Template for `forms` view so hidden columns are genuinely removed from the grid
   const formsGridTemplate = useMemo(() => {
-    const tracks: string[] = ['32px', 'minmax(130px, 1.35fr)'];
+    const tracks: string[] = ['28px', 'minmax(116px, 1.2fr)'];
     if (visibleCols.cocaRank) {
-      tracks.push('124px');
+      tracks.push('112px');
     }
     if (!isMediumTableLayout && visibleCols.cocaPos) {
-      tracks.push('minmax(125px, 1.15fr)');
+      tracks.push('minmax(146px, 1.35fr)');
     }
     if (visibleCols.cetLevel) {
-      tracks.push('64px');
+      tracks.push('68px');
     }
     if (visibleCols.bncFamily) {
       tracks.push('minmax(96px, 1fr)');
     }
     if (!isMediumTableLayout && visibleCols.bncFormFreq) {
-      tracks.push('76px');
+      tracks.push('66px');
     }
-    tracks.push('74px'); // Status column
+    tracks.push('66px'); // Status column
     return tracks.join(' ');
   }, [visibleCols, isMediumTableLayout]);
 
@@ -545,7 +545,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         <div
           role="tablist"
           aria-label="切换词汇实体层级视图"
-          className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0"
+          className="inline-flex items-center p-0.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--border-subtle)] gap-0.5 min-w-0"
         >
           {(
             [
@@ -585,19 +585,21 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               <button
                 key={mode.id}
                 type="button"
+                role="tab"
+                aria-selected={active}
                 onClick={() => {
                   setEntityMode(mode.id);
                   setSelectedRowIds(new Set());
                   lastClickedIndexRef.current = null;
                 }}
-                className={`px-2.5 py-1 rounded text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md text-xs font-medium inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
-                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] font-semibold shadow-2xs'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <span>{mode.label}</span>
-                <span className="hidden sm:inline font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                <span className={`hidden sm:inline font-mono-tabular text-[11px] ${active ? 'text-[var(--accent-primary)]' : 'text-[var(--text-muted)]'}`}>
                   {mode.badge}
                 </span>
               </button>
@@ -613,7 +615,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] inline-flex items-center gap-1 cursor-pointer"
             title="将当前筛选条件保存为动态词集"
           >
-            <BookmarkPlus className="w-3.5 h-3.5" />
+            <BookmarkPlus className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="hidden sm:inline">存为词集</span>
           </button>
 
@@ -623,7 +625,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer"
             title="导出包含 COCA 分词性排名、BNC 词族与个人笔记的 Anki TSV 制卡文件"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Anki TSV</span>
           </button>
 
@@ -645,7 +647,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 title="自定义显示列"
                 aria-label="自定义显示列"
               >
-                <Columns className="w-3.5 h-3.5" />
+                <Columns className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
               {showColumnMenu && (
                 <div className="absolute right-0 mt-1 w-48 p-2.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl z-30 space-y-1.5 text-xs">
@@ -687,7 +689,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       {/* Row 2: Search, Source Intersection, COCA Quick Tiers, Sort & Advanced Toggle */}
       <div className="px-3.5 sm:px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center gap-2 shrink-0">
         {/* Search Input + Match Mode */}
-        <div className="flex items-center flex-1 min-w-[180px] max-w-md h-8 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-md focus-within:border-[var(--accent-primary)] overflow-hidden">
+        <div className="flex items-center flex-1 min-w-[230px] sm:min-w-[265px] max-w-md h-8 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-md focus-within:border-[var(--accent-primary)] overflow-hidden">
           <Search className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2.5 shrink-0" />
           <input
             type="search"
@@ -695,7 +697,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             onChange={(e) =>
               onChangeCriteria((prev) => ({ ...prev, searchQuery: e.target.value }))
             }
-            placeholder="搜索单词、词头、短语或变体…"
+            placeholder="搜索单词、词头或短语…"
             aria-label="词库检索"
             className="w-full px-2 h-full text-xs bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none min-w-0"
           />
@@ -1135,64 +1137,64 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       {/* Table Header */}
       {entityMode === 'lexemes' ? (
         containerWidth >= 740 ? (
-          <div className="grid grid-cols-[64px_minmax(120px,1.3fr)_88px_96px_minmax(100px,1fr)_96px_78px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>官方排名</div>
-            <div>词元</div>
-            <div>词性</div>
-            <div className="text-right pr-3">COCA 频次</div>
-            <div>占词头比</div>
-            <div>BNC / 考纲</div>
-            <div className="text-right">词性状态</div>
+          <div className="grid grid-cols-[64px_minmax(120px,1.3fr)_84px_92px_minmax(100px,1fr)_96px_74px] gap-x-3 items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">官方排名</div>
+            <div className="truncate">词元</div>
+            <div className="truncate">词性</div>
+            <div className="text-right truncate">COCA 频次</div>
+            <div className="truncate">占词头比</div>
+            <div className="truncate">BNC / 考纲</div>
+            <div className="text-right truncate">词性状态</div>
           </div>
         ) : (
-          <div className="grid grid-cols-[58px_minmax(110px,1.3fr)_78px_84px_74px] items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>排名</div>
-            <div>词元</div>
-            <div>词性</div>
-            <div className="text-right pr-2">频次</div>
-            <div className="text-right">状态</div>
+          <div className="grid grid-cols-[58px_minmax(110px,1.3fr)_76px_80px_70px] gap-x-2.5 items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">排名</div>
+            <div className="truncate">词元</div>
+            <div className="truncate">词性</div>
+            <div className="text-right truncate">频次</div>
+            <div className="text-right truncate">状态</div>
           </div>
         )
       ) : entityMode === 'families' ? (
         containerWidth >= 740 ? (
-          <div className="grid grid-cols-[68px_minmax(130px,1.3fr)_92px_96px_minmax(140px,1.5fr)_76px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>BNC 频段</div>
-            <div>词族首词</div>
-            <div className="text-right pr-3">族总频次</div>
-            <div>COCA 排名</div>
-            <div>派生与屈折成员预览</div>
-            <div className="text-right">操作</div>
+          <div className="grid grid-cols-[68px_minmax(130px,1.3fr)_88px_92px_minmax(140px,1.5fr)_72px] gap-x-3 items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">BNC 频段</div>
+            <div className="truncate">词族首词</div>
+            <div className="text-right truncate">族总频次</div>
+            <div className="truncate">COCA 排名</div>
+            <div className="truncate">派生与屈折成员预览</div>
+            <div className="text-right truncate">操作</div>
           </div>
         ) : (
-          <div className="grid grid-cols-[60px_minmax(120px,1.4fr)_86px_76px_68px] items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>频段</div>
-            <div>词族首词</div>
-            <div className="text-right pr-2">总频次</div>
-            <div>COCA</div>
-            <div className="text-right">操作</div>
+          <div className="grid grid-cols-[60px_minmax(120px,1.4fr)_82px_72px_66px] gap-x-2.5 items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">频段</div>
+            <div className="truncate">词族首词</div>
+            <div className="text-right truncate">总频次</div>
+            <div className="truncate">COCA</div>
+            <div className="text-right truncate">操作</div>
           </div>
         )
       ) : entityMode === 'official_entries' ? (
         containerWidth >= 720 ? (
-          <div className="grid grid-cols-[68px_minmax(145px,1.25fr)_118px_minmax(180px,1.8fr)_104px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>考纲等级</div>
-            <div>考纲词目 · 对应词性</div>
-            <div>COCA · BNC</div>
-            <div>同词目派生/变体与考纲记录</div>
-            <div className="text-right">组内掌握 / 状态</div>
+          <div className="grid grid-cols-[68px_minmax(140px,1.25fr)_112px_minmax(170px,1.8fr)_100px] gap-x-3 items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">考纲等级</div>
+            <div className="truncate">考纲词目 · 对应词性</div>
+            <div className="truncate">COCA · BNC</div>
+            <div className="truncate">同词目派生/变体与考纲记录</div>
+            <div className="text-right truncate">组内掌握 / 状态</div>
           </div>
         ) : (
-          <div className="grid grid-cols-[58px_minmax(110px,1.2fr)_minmax(120px,1.4fr)_76px] items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-            <div>等级</div>
-            <div>考纲词目</div>
-            <div>同词目派生与记录</div>
-            <div className="text-right">状态</div>
+          <div className="grid grid-cols-[58px_minmax(110px,1.2fr)_minmax(115px,1.4fr)_72px] gap-x-2.5 items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+            <div className="truncate">等级</div>
+            <div className="truncate">考纲词目</div>
+            <div className="truncate">同词目派生与记录</div>
+            <div className="text-right truncate">状态</div>
           </div>
         )
       ) : !isCompactCardLayout ? (
         <div
           style={{ gridTemplateColumns: formsGridTemplate }}
-          className="grid items-center px-3.5 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none"
+          className="grid gap-x-3 items-center px-3.5 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none"
         >
           <div className="flex items-center justify-center">
             <button
@@ -1211,15 +1213,17 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               )}
             </button>
           </div>
-          <div>词形</div>
-          {visibleCols.cocaRank && <div>COCA 排名 · 频次</div>}
-          {!isMediumTableLayout && visibleCols.cocaPos && <div>COCA 词性分布</div>}
-          {visibleCols.cetLevel && <div>考纲</div>}
-          {visibleCols.bncFamily && <div>BNC 词族</div>}
-          {!isMediumTableLayout && visibleCols.bncFormFreq && (
-            <div className="text-right pr-2">BNC 词频</div>
+          <div className="min-w-0 truncate">词形</div>
+          {visibleCols.cocaRank && <div className="min-w-0 truncate">COCA 排名 · 频次</div>}
+          {!isMediumTableLayout && visibleCols.cocaPos && (
+            <div className="min-w-0 truncate">COCA 词性分布</div>
           )}
-          <div className="text-right">状态</div>
+          {visibleCols.cetLevel && <div className="min-w-0 truncate">考纲</div>}
+          {visibleCols.bncFamily && <div className="min-w-0 truncate">BNC 词族</div>}
+          {!isMediumTableLayout && visibleCols.bncFormFreq && (
+            <div className="min-w-0 text-right truncate">BNC 词频</div>
+          )}
+          <div className="min-w-0 text-right truncate">状态</div>
         </div>
       ) : (
         <div className="px-3.5 py-1.5 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
@@ -1286,14 +1290,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     }}
                     className={`grid ${
                       containerWidth >= 740
-                        ? 'grid-cols-[64px_minmax(120px,1.3fr)_88px_96px_minmax(100px,1fr)_96px_78px] px-4'
-                        : 'grid-cols-[58px_minmax(110px,1.3fr)_78px_84px_74px] px-3.5'
+                        ? 'grid-cols-[64px_minmax(120px,1.3fr)_84px_92px_minmax(100px,1fr)_96px_74px] gap-x-3 px-4'
+                        : 'grid-cols-[58px_minmax(110px,1.3fr)_76px_80px_70px] gap-x-2.5 px-3.5'
                     } items-center border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer`}
                   >
-                    <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
+                    <div className="min-w-0 truncate font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
                       #{lex.rank.toLocaleString()}
                     </div>
-                    <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                    <div className="min-w-0 flex items-baseline gap-1.5 overflow-hidden">
                       <span
                         translate="no"
                         className="font-serif-lexicon font-semibold text-[15px] text-[var(--text-primary)] truncate"
@@ -1306,43 +1310,43 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         </span>
                       )}
                     </div>
-                    <div>
+                    <div className="min-w-0 overflow-hidden">
                       <span
-                        className={`px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold inline-block truncate max-w-full ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono-tabular font-semibold inline-block truncate max-w-full ${
                           posMeta?.badgeClass || ''
                         }`}
                       >
                         {posMeta?.shortLabel || lex.pos}
                       </span>
                     </div>
-                    <div className="text-right pr-2 sm:pr-3 font-mono-tabular font-medium text-[var(--text-primary)]">
+                    <div className="min-w-0 text-right font-mono-tabular font-medium text-[var(--text-primary)] truncate">
                       {lex.frequency.toLocaleString()}
                     </div>
                     {containerWidth >= 740 && (
-                      <div className="flex items-center gap-2 pr-3 font-mono-tabular text-[11px]">
-                        <div className="w-16 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
+                      <div className="min-w-0 flex items-center gap-2 font-mono-tabular text-[11px] overflow-hidden">
+                        <div className="w-14 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden shrink-0">
                           <div
                             className="h-full bg-[var(--accent-primary)]"
                             style={{ width: `${Math.max(3, sharePct)}%` }}
                           />
                         </div>
-                        <span className="text-[var(--text-secondary)]">{sharePct}%</span>
+                        <span className="text-[var(--text-secondary)] truncate">{sharePct}%</span>
                       </div>
                     )}
                     {containerWidth >= 740 && (
-                      <div className="flex items-center gap-1 font-mono-tabular text-[11px] truncate">
+                      <div className="min-w-0 flex items-center gap-1 font-mono-tabular text-[11px] overflow-hidden">
                         {wordItem?.band && (
-                          <span className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-secondary)]">
+                          <span className="px-1.5 py-0.5 rounded bg-[var(--bg-subtle)] text-[10px] text-[var(--text-secondary)] shrink-0">
                             {wordItem.band}
                           </span>
                         )}
                         {wordItem?.isCet4 && (
-                          <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70">
+                          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold shrink-0 bg-teal-500/12 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300">
                             CET-4
                           </span>
                         )}
                         {!wordItem?.isCet4 && wordItem?.isCet6 && (
-                          <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/70">
+                          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold shrink-0 bg-indigo-500/12 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
                             CET-6
                           </span>
                         )}
@@ -1396,16 +1400,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     }}
                     className={`grid ${
                       containerWidth >= 740
-                        ? 'grid-cols-[68px_minmax(130px,1.3fr)_92px_96px_minmax(140px,1.5fr)_76px] px-4'
-                        : 'grid-cols-[60px_minmax(120px,1.4fr)_86px_76px_68px] px-3.5'
+                        ? 'grid-cols-[68px_minmax(130px,1.3fr)_88px_92px_minmax(140px,1.5fr)_72px] gap-x-3 px-4'
+                        : 'grid-cols-[60px_minmax(120px,1.4fr)_82px_72px_66px] gap-x-2.5 px-3.5'
                     } items-center border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer`}
                   >
-                    <div>
+                    <div className="min-w-0 overflow-hidden">
                       <span className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono-tabular text-[11px] font-semibold text-[var(--text-secondary)]">
                         BNC {fam.band}
                       </span>
                     </div>
-                    <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                    <div className="min-w-0 flex items-baseline gap-1.5 overflow-hidden">
                       <span
                         translate="no"
                         className="font-serif-lexicon font-bold text-[15px] text-[var(--text-primary)] truncate"
@@ -1416,10 +1420,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         ({fam.members.length}词)
                       </span>
                     </div>
-                    <div className="text-right pr-2 sm:pr-3 font-mono-tabular font-semibold text-[var(--text-primary)]">
+                    <div className="min-w-0 text-right font-mono-tabular font-semibold text-[var(--text-primary)] truncate">
                       {fam.totalFrequency.toLocaleString()}
                     </div>
-                    <div className="font-mono-tabular text-[11px] truncate">
+                    <div className="min-w-0 font-mono-tabular text-[11px] truncate">
                       {fam.headwordCocaRank ? (
                         <span className="text-blue-600 dark:text-blue-400 font-semibold">
                           #{fam.headwordCocaRank.toLocaleString()}
@@ -1431,7 +1435,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     {containerWidth >= 740 && (
                       <div
                         translate="no"
-                        className="text-[11px] text-[var(--text-muted)] truncate pr-2"
+                        className="min-w-0 text-[11px] text-[var(--text-muted)] truncate"
                       >
                         {fam.members
                           .slice(0, 6)
@@ -1502,17 +1506,17 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     }}
                     className={`grid ${
                       containerWidth >= 720
-                        ? 'grid-cols-[68px_minmax(145px,1.25fr)_118px_minmax(180px,1.8fr)_104px] px-4'
-                        : 'grid-cols-[58px_minmax(110px,1.2fr)_minmax(120px,1.4fr)_76px] px-3.5'
+                        ? 'grid-cols-[68px_minmax(140px,1.25fr)_112px_minmax(170px,1.8fr)_100px] gap-x-3 px-4'
+                        : 'grid-cols-[58px_minmax(110px,1.2fr)_minmax(115px,1.4fr)_72px] gap-x-2.5 px-3.5'
                     } items-center border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer`}
                   >
                     {/* Col 1: Syllabus Level Badge */}
-                    <div>
+                    <div className="min-w-0 overflow-hidden">
                       <span
-                        className={`px-1.5 py-0.5 rounded border font-mono-tabular text-[10px] font-semibold ${
+                        className={`px-2 py-0.5 rounded-md font-mono-tabular text-[10px] font-semibold ${
                           entry.isCet6
-                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/70'
-                            : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70'
+                            ? 'bg-indigo-500/12 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
+                            : 'bg-teal-500/12 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300'
                         }`}
                       >
                         {entry.isCet6 ? 'CET-6' : 'CET-4'}
@@ -1520,7 +1524,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     </div>
 
                     {/* Col 2: Core Syllabus Headword & Homograph-Specific PoS */}
-                    <div className="min-w-0 pr-2 flex items-center gap-1.5">
+                    <div className="min-w-0 flex items-center gap-1.5 overflow-hidden">
                       <span
                         translate="no"
                         className="font-serif-lexicon font-bold text-[15px] text-[var(--text-primary)] truncate"
@@ -1534,16 +1538,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       )}
                       {corePosMeta && (
                         <span
-                          className={`px-1.5 py-0.2 rounded border text-[10px] font-mono-tabular font-semibold shrink-0 ${corePosMeta.badgeClass}`}
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono-tabular font-semibold shrink-0 ${corePosMeta.badgeClass}`}
                         >
-                          {corePosMeta.abbr}
+                          {corePosMeta.shortLabel}
                         </span>
                       )}
                     </div>
 
                     {/* Col 3: Homograph-Specific COCA Rank & BNC Family Band (hidden on <720px) */}
                     {containerWidth >= 720 && (
-                      <div className="font-mono-tabular text-[11px] pr-2 flex items-center gap-1.5 truncate">
+                      <div className="min-w-0 font-mono-tabular text-[11px] flex items-center gap-1.5 truncate">
                         {effectiveCocaRank ? (
                           <span className="font-semibold text-blue-600 dark:text-blue-400">
                             #{effectiveCocaRank.toLocaleString()}
@@ -1552,15 +1556,15 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                           <span className="text-[var(--text-muted)]">—</span>
                         )}
                         {coreWord?.band && (
-                          <span className="px-1.5 py-0.2 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-secondary)]">
+                          <span className="px-1.5 py-0.2 rounded bg-[var(--bg-subtle)] text-[10px] text-[var(--text-secondary)]">
                             {coreWord.band}
                           </span>
                         )}
                       </div>
                     )}
 
-                    {/* Col 4: Syllabus Sibling Derivatives & Official Entry Traceability */}
-                    <div className="flex flex-wrap items-center gap-1 pr-2 max-h-[46px] overflow-y-auto no-scrollbar">
+                    {/* Col 4: Syllabus Sibling Derivatives (Learner-oriented, no raw syllabus line numbers) */}
+                    <div className="min-w-0 flex flex-wrap items-center gap-1 max-h-[46px] overflow-y-auto no-scrollbar">
                       {siblingWords.length > 0 ? (
                         siblingWords.map(({ spelling, item }) => {
                           const sPosMeta = item?.cocaPrimaryPos
@@ -1577,7 +1581,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                                 e.stopPropagation();
                                 if (item) onSelectWord(item, true);
                               }}
-                              className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                              className="px-2 py-0.5 rounded-md bg-[var(--bg-subtle)] hover:bg-[var(--border-subtle)] text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
                             >
                               <span className="font-serif-lexicon font-medium text-[var(--text-primary)]">
                                 {spelling}
@@ -1595,13 +1599,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             </button>
                           );
                         })
+                      ) : coreWord?.headword && coreWord.headword !== coreWord.word ? (
+                        <span className="text-[11px] text-[var(--text-muted)] truncate">
+                          所属词族: <span translate="no" className="font-serif-lexicon text-[var(--text-secondary)]">{coreWord.headword}</span>
+                        </span>
                       ) : (
-                        <span
-                          translate="no"
-                          className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate"
-                          title={`CET2016 原始词目 (#${entry.lineNumber}): ${entry.rawLine}`}
-                        >
-                          #{entry.lineNumber} · {entry.rawLine}
+                        <span className="text-[11px] text-[var(--text-muted)] truncate">
+                          独立考纲词目
                         </span>
                       )}
                     </div>
@@ -1661,7 +1665,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 word.bncLinkedViaVariant
               );
 
-              const topLexemes = (word.cocaLexemes || []).slice(0, 3);
+              const topLexemes = (word.cocaLexemes || []).slice(0, 2);
               const primaryPosMeta = word.cocaPrimaryPos
                 ? COCA_POS_META[word.cocaPrimaryPos]
                 : null;
@@ -1811,7 +1815,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     transform: `translateY(${virtualRow.start}px)`,
                     gridTemplateColumns: formsGridTemplate,
                   }}
-                  className={`group grid items-center px-3.5 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
+                  className={`group grid gap-x-3 items-center px-3.5 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
                     isChecked
                       ? 'bg-[var(--accent-soft)]/90'
                       : isSelected
@@ -1850,7 +1854,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   </button>
 
                   {/* Col 2: Word */}
-                  <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
+                  <div className="min-w-0 flex items-baseline gap-1.5 overflow-hidden">
                     <span
                       translate="no"
                       className="font-serif-lexicon font-semibold text-[15px] text-[var(--text-primary)] truncate"
@@ -1874,7 +1878,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
                   {/* Col 3: COCA Rank & Total Freq (Omitted when hidden) */}
                   {visibleCols.cocaRank && (
-                    <div className="font-mono-tabular text-[11px] pr-2 whitespace-nowrap truncate">
+                    <div className="min-w-0 font-mono-tabular text-[11px] whitespace-nowrap truncate overflow-hidden">
                       {word.inCoca && displayCocaRank !== null ? (
                         <div className="flex items-center gap-1 truncate">
                           <span className="font-semibold text-blue-600 dark:text-blue-400">
@@ -1904,7 +1908,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   {/* Col 4: COCA PoS Distribution (Omitted when hidden or medium layout) */}
                   {!isMediumTableLayout && visibleCols.cocaPos && (
                     <div
-                      className="min-w-0 pr-2 flex items-center gap-1 overflow-hidden"
+                      className="min-w-0 flex items-center gap-1 overflow-hidden"
                       title={
                         (word.cocaLexemes || [])
                           .map(
@@ -1916,25 +1920,30 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     >
                       {topLexemes.length > 0 ? (
                         <>
-                          {topLexemes.map((lex) => {
+                          {topLexemes.map((lex, idx) => {
                             const pMeta = COCA_POS_META[lex.pos];
+                            const multiPos = (word.cocaLexemes || []).length > 1;
+                            const pct =
+                              multiPos && idx === 0
+                                ? lex.sharePct >= 99.5
+                                  ? 99
+                                  : Math.max(1, Math.round(lex.sharePct))
+                                : null;
                             return (
                               <span
                                 key={lex.lexemeId}
-                                className={`px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold whitespace-nowrap shrink-0 ${
+                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono-tabular font-semibold whitespace-nowrap shrink-0 ${
                                   pMeta?.badgeClass || ''
                                 }`}
                               >
-                                {pMeta?.abbr || lex.pos}
-                                {(word.cocaLexemes || []).length > 1
-                                  ? ` ${Math.round(lex.sharePct)}%`
-                                  : ''}
+                                {idx === 0 ? pMeta?.shortLabel || lex.pos : pMeta?.abbr || lex.pos}
+                                {pct !== null ? ` ${pct}%` : ''}
                               </span>
                             );
                           })}
-                          {(word.cocaLexemes || []).length > 3 && (
+                          {(word.cocaLexemes || []).length > 2 && (
                             <span className="text-[10px] font-mono-tabular text-[var(--text-muted)] shrink-0">
-                              +{(word.cocaLexemes || []).length - 3}
+                              +{(word.cocaLexemes || []).length - 2}
                             </span>
                           )}
                         </>
@@ -1948,17 +1957,17 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
                   {/* Col 5: CET Level (Omitted when hidden) */}
                   {visibleCols.cetLevel && (
-                    <div className="font-mono-tabular text-[11px] whitespace-nowrap">
+                    <div className="min-w-0 font-mono-tabular text-[11px] whitespace-nowrap overflow-hidden">
                       {word.isCet4 && word.isCet6 ? (
-                        <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-teal-500/12 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300">
                           CET-4/6
                         </span>
                       ) : word.isCet4 ? (
-                        <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-teal-500/12 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300">
                           CET-4
                         </span>
                       ) : word.isCet6 ? (
-                        <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/70">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/12 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
                           CET-6
                         </span>
                       ) : (
@@ -1969,7 +1978,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
                   {/* Col 6: BNC Family & Band (Omitted when hidden) */}
                   {visibleCols.bncFamily && (
-                    <div className="min-w-0 pr-2 flex items-center gap-1 font-mono-tabular text-[11px]">
+                    <div className="min-w-0 flex items-center gap-1 font-mono-tabular text-[11px] overflow-hidden">
                       {word.headword ? (
                         <>
                           {word.band && (
@@ -2006,13 +2015,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
                   {/* Col 7: BNC Form Freq (Omitted when hidden) */}
                   {!isMediumTableLayout && visibleCols.bncFormFreq && (
-                    <div className="pr-2 text-right font-mono-tabular text-[11px] whitespace-nowrap text-[var(--text-secondary)]">
+                    <div className="min-w-0 text-right font-mono-tabular text-[11px] whitespace-nowrap truncate text-[var(--text-secondary)]">
                       {bncFreqText}
                     </div>
                   )}
 
                   {/* Col 8: Status Selector */}
-                  <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                  <div className="min-w-0 flex justify-end" onClick={(e) => e.stopPropagation()}>
                     <select
                       aria-label={`${word.word} 学习状态`}
                       value={status}
@@ -2173,14 +2182,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       {/* Save Dynamic Collection Modal */}
       {showSaveModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-[1px]"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-[1px] overscroll-contain"
           onClick={() => setShowSaveModal(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label="保存为动态词集"
-            className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl shadow-xl p-5 space-y-4"
+            className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg shadow-xl p-5 space-y-4 overscroll-contain"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -2190,9 +2199,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowSaveModal(false)}
+                aria-label="关闭弹窗"
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
 

@@ -146,12 +146,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
       {/* Left Pane: 5-Layer Mastery Cards + 3 Frequency-Weighted Coverage Metrics + Activity */}
       <aside
-        className={`w-full lg:w-[390px] xl:w-[430px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 lg:flex-none lg:h-full min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)] ${
+        className={`w-full lg:w-[390px] xl:w-[430px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 lg:flex-none lg:h-full min-h-0 overflow-y-auto p-3.5 sm:p-4 space-y-3.5 ${
           mobileInsightsPane === 'overview' ? 'flex' : 'hidden lg:flex'
         }`}
       >
         {/* Section 1: 5-Layer Multi-Granularity Mastery Breakdown */}
-        <div className="p-4 space-y-3 bg-[var(--bg-surface)]">
+        <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
               五层语言学粒度掌握度核算
@@ -161,7 +161,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 font-mono-tabular text-xs">
+          <div className="grid grid-cols-2 gap-2 font-mono-tabular text-xs">
             {/* Layer 1: Headword Mastery */}
             <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
               <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
@@ -226,7 +226,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
 
           {/* Layer 5: CET Official Syllabus Entries */}
-          <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono-tabular text-xs space-y-1.5">
+          <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] font-mono-tabular text-xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-sans text-[11px] font-semibold text-[var(--text-secondary)]">
                 5. CET2016 官方考纲词目与词形掌握
@@ -242,26 +242,26 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
               >
                 <span>筛选考纲</span>
-                <ArrowUpRight className="w-3 h-3" />
+                <ArrowUpRight className="w-3 h-3" aria-hidden="true" />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--border-subtle)]">
               <div>
                 <div className="text-[10px] text-[var(--text-muted)]">CET-4 四级大纲</div>
-                <div className="font-bold text-[var(--text-primary)]">
+                <div className="font-bold text-[var(--text-primary)] mt-0.5">
                   词形 {stats.cet4FormsMastered}/{stats.cet4FormsTotal}
                 </div>
-                <div className="text-[10px] text-[var(--text-secondary)]">
+                <div className="text-[10px] text-[var(--text-secondary)] mt-0.5">
                   词目覆盖 {stats.cet4OfficialPartialCovered}/{stats.cet4OfficialTotal} (完整{' '}
                   {stats.cet4OfficialFullMastered})
                 </div>
               </div>
               <div>
                 <div className="text-[10px] text-[var(--text-muted)]">CET-6 六级新增</div>
-                <div className="font-bold text-[var(--text-primary)]">
+                <div className="font-bold text-[var(--text-primary)] mt-0.5">
                   词形 {stats.cet6OnlyFormsMastered}/{stats.cet6OnlyFormsTotal}
                 </div>
-                <div className="text-[10px] text-[var(--text-secondary)]">
+                <div className="text-[10px] text-[var(--text-secondary)] mt-0.5">
                   词目覆盖 {stats.cet6OfficialPartialCovered}/{stats.cet6OfficialTotal} (完整{' '}
                   {stats.cet6OfficialFullMastered})
                 </div>
@@ -271,7 +271,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* Section 2: Three Independent Frequency-Weighted Coverage Metrics */}
-        <div className="p-4 space-y-2.5 bg-[var(--bg-surface)]">
+        <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2.5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
               三项独立语料频次加权覆盖率
@@ -328,9 +328,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         </div>
 
         {/* Section 3: Top Unmastered Content Families & 14-Day Activity */}
-        <div className="p-4 space-y-3">
+        <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
               高价值待攻克实词族 & 近 14 日标注趋势
             </h3>
             <span className="text-[11px] font-mono-tabular text-[var(--text-muted)]">
@@ -338,7 +338,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </span>
           </div>
 
-          <div className="h-20 pt-3 px-2 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded flex items-end justify-between gap-1">
+          <div className="h-20 pt-3 px-2 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-lg flex items-end justify-between gap-1">
             {recent14Days.map((d) => {
               const hPct =
                 d.count > 0 ? Math.max(12, Math.round((d.count / maxDailyCount) * 100)) : 4;
@@ -349,7 +349,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                   title={`${d.dateStr}: ${d.count} 次操作`}
                 >
                   <div
-                    className={`w-full rounded-t-xs transition-all ${
+                    className={`w-full rounded-t-xs transition-[height] ${
                       d.count > 0 ? 'bg-[var(--accent-primary)]' : 'bg-[var(--bg-subtle)]'
                     }`}
                     style={{ height: `${hPct}%` }}
@@ -362,7 +362,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             })}
           </div>
 
-          <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded bg-[var(--bg-surface)]">
+          <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] overflow-hidden">
             {stats.topUnmasteredFamilies.map(({ family, unmasteredCount, unmasteredFreq }, idx) => (
               <button
                 key={family.id}
@@ -486,7 +486,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] gap-x-2.5 items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
               <div>COCA 排名区间</div>
               <div>已掌握 / 总数</div>
               <div className="hidden sm:block">在学与待学</div>
@@ -518,7 +518,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         maxCocaRank: row.maxRank,
                       })
                     }
-                    className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] items-center px-4 py-3 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] gap-x-2.5 items-center px-4 py-3 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                   >
                     <div className="font-bold text-[var(--text-primary)] truncate pr-2">
                       {row.tierLabel}
@@ -532,11 +532,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     <div className="pr-3 sm:pr-4 flex items-center gap-2">
                       <div className="flex-1 h-2.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
                         <div
-                          className="h-full bg-emerald-500 transition-all"
+                          className="h-full bg-emerald-500 transition-[width]"
                           style={{ width: `${pct}%` }}
                         />
                         <div
-                          className="h-full bg-blue-500 transition-all"
+                          className="h-full bg-blue-500 transition-[width]"
                           style={{ width: `${activePct}%` }}
                         />
                       </div>
@@ -555,7 +555,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         ) : (
           /* ================= BNC 1k-25k 4-STATE BAND MATRIX ================= */
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] gap-x-2.5 items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
               <div>频段</div>
               <div>词族四态 (完/部/触/未)</div>
               <div className="hidden sm:block">词形掌握</div>
@@ -580,7 +580,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         bands: [row.bandNum],
                       })
                     }
-                    className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 py-2.5 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] gap-x-2.5 items-center px-4 py-2.5 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                   >
                     <div className="font-bold text-[var(--text-primary)]">
                       BNC {row.bandLabel}
@@ -611,11 +611,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                     <div className="pr-3 flex items-center gap-2">
                       <div className="flex-1 h-2 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
                         <div
-                          className="h-full bg-emerald-500 transition-all"
+                          className="h-full bg-emerald-500 transition-[width]"
                           style={{ width: `${row.pctMastered}%` }}
                         />
                         <div
-                          className="h-full bg-[var(--accent-primary)] transition-all"
+                          className="h-full bg-[var(--accent-primary)] transition-[width]"
                           style={{ width: `${activePct}%` }}
                         />
                       </div>

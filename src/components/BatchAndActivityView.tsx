@@ -377,7 +377,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
           </button>
 
           {lastBatchResult && (
-            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 rounded flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300">
               <span>已成功更新 {lastBatchResult.updatedCount} 条记录</span>
               <button
                 type="button"
@@ -392,16 +392,16 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                 }}
                 className="inline-flex items-center gap-1 font-semibold underline whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Undo2 className="w-3 h-3" />
+                <Undo2 className="w-3 h-3" aria-hidden="true" />
                 撤销此批次
               </button>
             </div>
           )}
 
           {actionError && (
-            <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded flex items-start justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+            <div className="p-2.5 bg-rose-500/10 border border-rose-500/25 rounded flex items-start justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
               <div className="flex items-start gap-1.5 min-w-0">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" aria-hidden="true" />
                 <span className="leading-relaxed">{actionError}</span>
               </div>
               <button
@@ -410,7 +410,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                 className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0 cursor-pointer"
                 aria-label="关闭错误提示"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </div>
           )}
@@ -484,7 +484,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                     setLogSearch(e.target.value);
                     setLogPage(0);
                   }}
-                  placeholder="筛选变更词条或来源..."
+                  placeholder="筛选变更词条或来源…"
                   className="w-full sm:w-44 pl-7 pr-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
@@ -510,7 +510,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                   onClick={onExportLogsCsv}
                   className="inline-flex items-center gap-1 px-2.5 py-1 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>导出 CSV</span>
                 </button>
               </div>
@@ -520,17 +520,18 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
 
         {/* Inline conflict error banner for logs pane */}
         {actionError && rightTab === 'logs' && (
-          <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-800/60 flex items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300 shrink-0">
+          <div className="px-4 py-2 bg-rose-500/10 border-b border-rose-500/25 flex items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300 shrink-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               <span className="truncate">{actionError}</span>
             </div>
             <button
               type="button"
               onClick={() => setActionError(null)}
+              aria-label="关闭错误提示"
               className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0 cursor-pointer"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </div>
         )}
@@ -544,7 +545,7 @@ export const BatchAndActivityView: React.FC<BatchAndActivityViewProps> = ({
                 <span>诊断 · 目标状态</span>
               </div>
             ) : (
-              <div className="grid grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+              <div className="grid grid-cols-[32px_minmax(96px,1fr)_minmax(130px,1.4fr)_92px_94px] gap-x-2.5 items-center px-3.5 sm:px-5 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
                 <div>纳入</div>
                 <div>输入原词</div>
                 <div>匹配词条与消歧</div>

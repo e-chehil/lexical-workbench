@@ -157,6 +157,10 @@ export function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+    const themeColor = darkMode ? '#090D16' : '#F8FAFC';
+    document.querySelectorAll('meta[name="theme-color"]').forEach((el) => {
+      el.setAttribute('content', themeColor);
+    });
     try {
       localStorage.setItem(THEME_STORAGE_KEY, darkMode ? 'dark' : 'light');
     } catch {
@@ -688,17 +692,35 @@ export function App() {
 
   return (
     <div className="h-[100dvh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)] overflow-hidden">
-      {/* 3-Zone Top Header Bar */}
+      <a
+        href="#main-workspace"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-1.5 focus:rounded focus:bg-[var(--accent-primary)] focus:text-white focus:text-xs focus:font-semibold"
+      >
+        跳转到主工作区
+      </a>
+
+      {/* 3-Zone Architectural Top Header Bar */}
       <header className="h-12 px-3.5 sm:px-5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-4 shrink-0 z-20">
         {/* Zone 1: Single-line Brand Wordmark */}
-        <span className="font-serif-lexicon font-bold text-base tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0 select-none">
-          Lexical Workbench
-        </span>
+        <div className="flex items-center gap-2 shrink-0 select-none">
+          <span
+            translate="no"
+            className="w-6 h-6 rounded-md bg-[var(--accent-primary)] text-white font-serif-lexicon font-bold text-xs inline-flex items-center justify-center shadow-2xs"
+          >
+            LW
+          </span>
+          <span
+            translate="no"
+            className="font-serif-lexicon font-bold text-base tracking-tight text-[var(--text-primary)] whitespace-nowrap"
+          >
+            Lexical Workbench
+          </span>
+        </div>
 
-        {/* Zone 2: Desktop 6-Workspace Navigation */}
+        {/* Zone 2: Desktop 6-Workspace Segmented Pill Navigation */}
         <nav
           aria-label="主工作区导航"
-          className="hidden md:flex items-center gap-1 bg-[var(--bg-subtle)] p-1 rounded-lg border border-[var(--border-subtle)] shrink-0"
+          className="hidden md:inline-flex items-center p-1 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] gap-0.5 shrink-0"
         >
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -707,11 +729,12 @@ export function App() {
               <button
                 key={item.id}
                 type="button"
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => handleWorkspaceChange(item.id)}
-                className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer focus-ring ${
+                className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring ${
                   isActive
-                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] shadow-2xs font-semibold'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    ? 'bg-[var(--bg-surface)] dark:bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold shadow-2xs'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/60'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -726,13 +749,16 @@ export function App() {
           <button
             type="button"
             onClick={() => setIsCommandModalOpen(true)}
-            className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--border-strong)] text-xs text-[var(--text-secondary)] inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring"
+            className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--border-strong)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring"
             title="全局词库快速检索 (Ctrl+K / ⌘K)"
           >
             <Search className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" aria-hidden="true" />
             <span className="hidden sm:inline">全局检索</span>
-            <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[var(--bg-subtle)] rounded border border-[var(--border-subtle)] text-[var(--text-muted)]">
-              ⌘K
+            <kbd
+              translate="no"
+              className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[var(--bg-subtle)] rounded border border-[var(--border-subtle)] text-[var(--text-muted)]"
+            >
+              ⌘&nbsp;K
             </kbd>
           </button>
 
@@ -748,7 +774,7 @@ export function App() {
                   return next;
                 })
               }
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring ${
+              className={`px-2.5 py-1.5 rounded-md border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring ${
                 isDrawerOpen
                   ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
                   : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -768,7 +794,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setDarkMode((d) => !d)}
-            className="p-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] shrink-0 cursor-pointer focus-ring"
+            className="p-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0 cursor-pointer focus-ring"
             title={darkMode ? '切换至浅色模式' : '切换至深色模式'}
             aria-label={darkMode ? '切换至浅色模式' : '切换至深色模式'}
           >
@@ -783,7 +809,7 @@ export function App() {
 
       {/* Main Split Body */}
       <div className="flex-1 flex min-h-0 overflow-hidden pb-12 md:pb-0 relative">
-        <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <main id="main-workspace" className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           {activeTab === 'explore' && (
             <ExploreView
               filteredWords={filteredWords}
@@ -1075,7 +1101,7 @@ export function App() {
       {/* Mobile Bottom Navigation Bar */}
       <nav
         aria-label="移动端底部导航"
-        className="md:hidden fixed bottom-0 inset-x-0 h-12 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] grid grid-cols-6 z-30"
+        className="md:hidden fixed bottom-0 inset-x-0 h-12 bg-[var(--border-subtle)] border-t border-[var(--border-subtle)] grid grid-cols-6 gap-px z-30 pb-[env(safe-area-inset-bottom)]"
       >
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -1084,9 +1110,12 @@ export function App() {
             <button
               key={item.id}
               type="button"
+              aria-current={isActive ? 'page' : undefined}
               onClick={() => handleWorkspaceChange(item.id)}
-              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer ${
-                isActive ? 'text-[var(--accent-primary)] font-semibold' : 'text-[var(--text-muted)]'
+              className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                isActive
+                  ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] font-semibold'
+                  : 'bg-[var(--bg-canvas)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
               <Icon className="w-4 h-4" aria-hidden="true" />

@@ -282,7 +282,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="检索词族首词或派生词..."
+              placeholder="检索词族首词或派生词…"
               className="w-full pl-8 pr-7 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)]"
             />
             {searchQuery && (
@@ -824,7 +824,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
 
               {/* Column Headers */}
               {centerWidth >= 580 ? (
-                <div className="grid grid-cols-[minmax(125px,1.25fr)_110px_58px_minmax(100px,1fr)_82px_94px] items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
+                <div className="grid grid-cols-[minmax(125px,1.25fr)_110px_58px_minmax(100px,1fr)_82px_94px] gap-x-2.5 items-center px-4 sm:px-5 h-8 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] shrink-0">
                   <div>词形与角色</div>
                   <div>COCA 词元与词性</div>
                   <div>大纲</div>
@@ -913,7 +913,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                     <div
                       key={member.normalized}
                       onClick={() => entry && onSelectWord(entry)}
-                      className={`grid grid-cols-[minmax(125px,1.25fr)_110px_58px_minmax(100px,1fr)_82px_94px] items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
+                      className={`grid grid-cols-[minmax(125px,1.25fr)_110px_58px_minmax(100px,1fr)_82px_94px] gap-x-2.5 items-center px-4 sm:px-5 py-2.5 cursor-pointer transition-colors ${
                         isHighlighted
                           ? 'bg-[var(--accent-soft)]'
                           : 'hover:bg-[var(--bg-hover)]'
@@ -980,7 +980,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                       <div className="flex items-center gap-2 pr-3">
                         <div className="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                           <div
-                            className={`h-full bg-[var(--accent-primary)] transition-all ${
+                            className={`h-full bg-[var(--accent-primary)] transition-[width] ${
                               shareDetail.isUltraLowNonZero ? 'min-w-[2px]' : ''
                             }`}
                             style={{
@@ -1048,13 +1048,13 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
 
       {/* Zone 3: Right Family Structure & Syllabus Panel (2xl+ 290px) */}
       {activeFamily && (
-        <aside className="hidden 2xl:flex 2xl:w-[290px] border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full overflow-y-auto divide-y divide-[var(--border-subtle)]">
-          <div className="p-4 space-y-3">
+        <aside className="hidden 2xl:flex 2xl:w-[290px] border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full overflow-y-auto p-3.5 space-y-3.5">
+          <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2.5">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
               词族掌握与多源覆盖
             </h3>
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-3 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-secondary)]">词形掌握进度</div>
                 <div className="text-lg font-mono-tabular font-bold text-[var(--text-primary)] mt-0.5">
                   {familyStats.mastered}{' '}
@@ -1063,7 +1063,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                   </span>
                 </div>
               </div>
-              <div className="p-3 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded">
+              <div className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-secondary)]">BNC 词频加权覆盖</div>
                 <div className="text-lg font-mono-tabular font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {familyStats.freqPct}%
@@ -1072,7 +1072,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
             </div>
           </div>
 
-          <div className="p-4 space-y-2.5">
+          <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
                 族内高频核心词形
@@ -1081,7 +1081,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                 Top 3 占 {familyStats.top3Pct}%
               </span>
             </div>
-            <div className="space-y-1.5">
+            <div className="divide-y divide-[var(--border-subtle)] border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] overflow-hidden">
               {[...activeFamily.members]
                 .sort((a, b) => b.frequency - a.frequency)
                 .slice(0, 5)
@@ -1098,7 +1098,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                         const entry = wordsMap.get(m.normalized);
                         if (entry) onSelectWord(entry);
                       }}
-                      className="w-full flex items-center justify-between px-2.5 py-1.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded text-xs hover:border-[var(--border-strong)] transition-colors cursor-pointer"
+                      className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-[var(--bg-hover)] text-xs transition-colors cursor-pointer"
                     >
                       <span
                         translate="no"
@@ -1115,7 +1115,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
             </div>
           </div>
 
-          <div className="p-4 space-y-2.5">
+          <div className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2.5">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
               四六级考纲同组词与派生簇 ({familyStats.cetRefs.length})
             </h3>
@@ -1141,7 +1141,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                   return (
                     <div
                       key={i}
-                      className="p-2.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded space-y-2"
+                      className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] space-y-2"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <button
@@ -1156,7 +1156,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                           {mainWord}
                         </button>
                         <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-semibold ${
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono-tabular font-semibold ${
                             ref.level === 'CET6'
                               ? 'bg-indigo-500/12 text-indigo-700 dark:text-indigo-300'
                               : 'bg-teal-500/12 text-teal-700 dark:text-teal-300'
@@ -1166,7 +1166,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                         </span>
                       </div>
                       {siblingWords.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-[var(--border-subtle)]">
+                        <div className="flex flex-wrap items-center gap-1">
                           <span className="text-[10px] text-[var(--text-muted)] mr-0.5">
                             同组派生:
                           </span>
@@ -1179,7 +1179,7 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                                 const w = wordsMap.get(token.toLowerCase());
                                 if (w) onSelectWord(w);
                               }}
-                              className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] font-serif-lexicon font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                              className="px-1.5 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] font-serif-lexicon font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
                             >
                               {token}
                             </button>

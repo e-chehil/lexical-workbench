@@ -600,8 +600,8 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
             </div>
 
             {/* Ranking Table */}
-            <div className="border border-[var(--border-subtle)] rounded-lg overflow-hidden bg-[var(--bg-surface)]">
-              <div className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)]">
+            <div className="border border-[var(--border-subtle)] rounded-md overflow-hidden bg-[var(--bg-surface)]">
+              <div className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] gap-x-2.5 items-center px-4 py-2 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)]">
                 <div>{rankingMode === 'lemma_pos' ? '官方排名' : '派生排名'}</div>
                 <div>词头 (Headword)</div>
                 <div>{rankingMode === 'lemma_pos' ? '当前词性' : '主词性'}</div>
@@ -622,7 +622,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                           <div
                             key={lex.id}
                             onClick={() => w && onSelectWord(w)}
-                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] gap-x-2.5 items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                           >
                             <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
                               #{lex.rank.toLocaleString()}
@@ -670,7 +670,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                           <div
                             key={w.id}
                             onClick={() => onSelectWord(w)}
-                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] gap-x-2.5 items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                           >
                             <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
                               #{w.cocaHeadwordDerivedRank?.toLocaleString()}
@@ -746,9 +746,9 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
         {/* ==================================================================== */}
         {activeTab === 'freq_distribution' && (
           <div className="p-4 sm:p-5 space-y-5 max-w-7xl mx-auto">
-            {/* Top Summary Strip */}
+            {/* Top Summary KPI Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono-tabular">
-              <div className="p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-muted)]">COCA 2020 词元+词性记录</div>
                 <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">
                   {cocaStats.totalLexemeRecords.toLocaleString()}
@@ -757,7 +757,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                   对应 {cocaStats.distinctHeadwords.toLocaleString()} 个独立词头
                 </div>
               </div>
-              <div className="p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-muted)]">语料库总词频 (Tokens)</div>
                 <div className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-0.5">
                   {cocaStats.totalFrequency.toLocaleString()}
@@ -766,7 +766,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                   Top 1,000 贡献 {tierDistributionStats[0]?.sharePct}% 总频次
                 </div>
               </div>
-              <div className="p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-muted)]">Top 5,000 累计词频覆盖</div>
                 <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {tierDistributionStats[2]?.cumulativePct}%
@@ -775,7 +775,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                   典型齐夫定律 (Zipf&apos;s Law) 头部效应
                 </div>
               </div>
-              <div className="p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
+              <div className="p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
                 <div className="text-[11px] text-[var(--text-muted)]">多词性词头 / 带连字符词</div>
                 <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">
                   {cocaStats.multiPosHeadwords.toLocaleString()} /{' '}
@@ -1268,9 +1268,9 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                         sourceFilter: card.filter,
                       })
                     }
-                    className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                    className={`p-3 rounded-xl border text-left transition-colors cursor-pointer ${
                       card.highlight
-                        ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)]'
+                        ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)]/40 text-[var(--accent-primary)]'
                         : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] hover:border-[var(--accent-primary)]'
                     }`}
                   >
@@ -1506,7 +1506,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                     key={b.id}
                     type="button"
                     onClick={() => setDiffBucket(b.id)}
-                    className={`p-3.5 rounded-lg border text-left transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
                       active
                         ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)]'
                         : 'bg-[var(--bg-canvas)] border-[var(--border-subtle)] hover:border-[var(--accent-primary)]'
