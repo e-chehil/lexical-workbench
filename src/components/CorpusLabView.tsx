@@ -458,14 +458,14 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
       {/* Top Sub-Navigation Bar */}
-      <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+      <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           {[
-            { id: 'coca_ranking', label: 'COCA 排名探索器 (60k)', icon: BarChart3 },
-            { id: 'freq_distribution', label: '词频幂律与梯队分布', icon: Sparkles },
-            { id: 'pos_analytics', label: '一词多性与信息熵 (5,627)', icon: Layers },
-            { id: 'cross_corpus', label: '三源交集与 BNC×COCA 矩阵', icon: Filter },
-            { id: 'set_comparator', label: '双集合对比工作台 (A vs B)', icon: GitCompare },
+            { id: 'coca_ranking', label: 'COCA 排名 (60k)', icon: BarChart3 },
+            { id: 'freq_distribution', label: '词频幂律与梯队', icon: Sparkles },
+            { id: 'pos_analytics', label: '一词多性与熵 (5,627)', icon: Layers },
+            { id: 'cross_corpus', label: '三源交集与矩阵', icon: Filter },
+            { id: 'set_comparator', label: '双集合对比 (A vs B)', icon: GitCompare },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -474,7 +474,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as LabTab)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -488,7 +488,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
         </div>
 
         {savedToast && (
-          <span className="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
+          <span className="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-medium shrink-0">
             {savedToast}
           </span>
         )}
@@ -501,117 +501,113 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
         {/* ==================================================================== */}
         {activeTab === 'coca_ranking' && (
           <div className="p-4 sm:p-5 space-y-4 max-w-7xl mx-auto">
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRankingMode('lemma_pos');
-                      setRankPage(1);
-                    }}
-                    className={`px-2.5 py-1 rounded cursor-pointer ${
-                      rankingMode === 'lemma_pos'
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                        : 'text-[var(--text-secondary)]'
-                    }`}
-                  >
-                    词元+词性官方排名 (60,000 条)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRankingMode('derived_headword');
-                      setRankPage(1);
-                    }}
-                    className={`px-2.5 py-1 rounded cursor-pointer ${
-                      rankingMode === 'derived_headword'
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                        : 'text-[var(--text-secondary)]'
-                    }`}
-                  >
-                    词头合计派生排名 (53,951 词头)
-                  </button>
-                </div>
-
-                <select
-                  value={selectedTierId}
-                  onChange={(e) => {
-                    setSelectedTierId(e.target.value);
-                    setRankPage(1);
-                  }}
-                  aria-label="选择 COCA 排名区间"
-                  className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-mono-tabular"
-                >
-                  {RANK_TIERS.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      排名 {t.label}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={selectedPos}
-                  onChange={(e) => {
-                    setSelectedPos(e.target.value as CocaRawPos | 'ALL');
-                    setRankPage(1);
-                  }}
-                  aria-label="选择 COCA 词性"
-                  className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-mono-tabular"
-                >
-                  <option value="ALL">全部 14 种词性</option>
-                  {cocaStats.posDistribution.map((p) => (
-                    <option key={p.pos} value={p.pos}>
-                      {COCA_POS_META[p.pos]?.label || p.pos} ({p.count.toLocaleString()})
-                    </option>
-                  ))}
-                </select>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="search"
-                    value={rankSearch}
-                    onChange={(e) => {
-                      setRankSearch(e.target.value);
-                      setRankPage(1);
-                    }}
-                    placeholder="过滤词头…"
-                    className="pl-7 pr-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs w-36"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] flex flex-wrap lg:flex-nowrap items-center justify-between gap-2">
+              <div className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs shrink-0">
                 <button
                   type="button"
-                  onClick={() =>
-                    onJumpToExploreWithFilter({
-                      ...DEFAULT_FILTER_CRITERIA,
-                      sourceFilter: 'coca_all',
-                      cocaRankMode: rankingMode,
-                      minCocaRank: activeTier.min,
-                      maxCocaRank: activeTier.max,
-                      cocaPosFilter: selectedPos === 'ALL' ? [] : [selectedPos],
-                    })
-                  }
-                  className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--accent-primary)] hover:border-[var(--accent-primary)] inline-flex items-center gap-1 cursor-pointer"
+                  onClick={() => {
+                    setRankingMode('lemma_pos');
+                    setRankPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded whitespace-nowrap cursor-pointer ${
+                    rankingMode === 'lemma_pos'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
                 >
-                  <span>在探索视图打开</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
+                  词元+词性 (60k)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRankingMode('derived_headword');
+                    setRankPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded whitespace-nowrap cursor-pointer ${
+                    rankingMode === 'derived_headword'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  词头合计 (54k)
                 </button>
               </div>
+
+              <select
+                value={selectedTierId}
+                onChange={(e) => {
+                  setSelectedTierId(e.target.value);
+                  setRankPage(1);
+                }}
+                aria-label="选择 COCA 排名区间"
+                className="px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-mono-tabular shrink-0 cursor-pointer"
+              >
+                {RANK_TIERS.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    排名 {t.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedPos}
+                onChange={(e) => {
+                  setSelectedPos(e.target.value as CocaRawPos | 'ALL');
+                  setRankPage(1);
+                }}
+                aria-label="选择 COCA 词性"
+                className="px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-mono-tabular shrink-0 cursor-pointer"
+              >
+                <option value="ALL">全部 14 种词性</option>
+                {cocaStats.posDistribution.map((p) => (
+                  <option key={p.pos} value={p.pos}>
+                    {COCA_POS_META[p.pos]?.shortLabel || p.pos} ({p.count.toLocaleString()})
+                  </option>
+                ))}
+              </select>
+
+              <div className="relative flex-1 min-w-[130px]">
+                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="search"
+                  value={rankSearch}
+                  onChange={(e) => {
+                    setRankSearch(e.target.value);
+                    setRankPage(1);
+                  }}
+                  placeholder="搜索或过滤词头…"
+                  className="w-full pl-8 pr-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  onJumpToExploreWithFilter({
+                    ...DEFAULT_FILTER_CRITERIA,
+                    sourceFilter: 'coca_all',
+                    cocaRankMode: rankingMode,
+                    minCocaRank: activeTier.min,
+                    maxCocaRank: activeTier.max,
+                    cocaPosFilter: selectedPos === 'ALL' ? [] : [selectedPos],
+                  })
+                }
+                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--accent-primary)] hover:border-[var(--accent-primary)] inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <span>在检索中打开</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Ranking Table */}
             <div className="border border-[var(--border-subtle)] rounded-lg overflow-hidden bg-[var(--bg-surface)]">
-              <div className="grid grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)]">
+              <div className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)]">
                 <div>{rankingMode === 'lemma_pos' ? '官方排名' : '派生排名'}</div>
                 <div>词头 (Headword)</div>
-                <div>{rankingMode === 'lemma_pos' ? '当前词性' : '主词性 / 总数'}</div>
-                <div className="text-right pr-3">COCA 频次</div>
-                <div>词头内占比 / 信息熵</div>
-                <div className="text-right">BNC / CET</div>
+                <div>{rankingMode === 'lemma_pos' ? '当前词性' : '主词性'}</div>
+                <div className="text-right sm:pr-3">COCA 频次</div>
+                <div className="hidden sm:block">词头内占比 / 信息熵</div>
+                <div className="hidden sm:block text-right">BNC / CET</div>
               </div>
 
               <div className="divide-y divide-[var(--border-subtle)]">
@@ -626,28 +622,28 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                           <div
                             key={lex.id}
                             onClick={() => w && onSelectWord(w)}
-                            className="grid grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
                           >
                             <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
                               #{lex.rank.toLocaleString()}
                             </div>
                             <div
                               translate="no"
-                              className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
+                              className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
                             >
                               {lex.headword}
                             </div>
-                            <div>
+                            <div className="truncate">
                               <span
                                 className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-semibold ${meta?.badgeClass || ''}`}
                               >
                                 {meta?.shortLabel || lex.pos}
                               </span>
                             </div>
-                            <div className="text-right pr-3 font-mono-tabular text-[var(--text-primary)]">
+                            <div className="text-right sm:pr-3 font-mono-tabular text-[var(--text-primary)]">
                               {lex.frequency.toLocaleString()}
                             </div>
-                            <div className="flex items-center gap-2 font-mono-tabular text-[11px]">
+                            <div className="hidden sm:flex items-center gap-2 font-mono-tabular text-[11px]">
                               <div className="w-16 h-1.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden">
                                 <div
                                   className="h-full bg-[var(--accent-primary)]"
@@ -658,7 +654,7 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                                 {sharePct}% ({w?.cocaPosCount || 1}性)
                               </span>
                             </div>
-                            <div className="text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                            <div className="hidden sm:block text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
                               {[w?.band, w?.isCet4 ? 'CET-4' : w?.isCet6 ? 'CET-6' : null]
                                 .filter(Boolean)
                                 .join(' · ') || '—'}
@@ -674,18 +670,18 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                           <div
                             key={w.id}
                             onClick={() => onSelectWord(w)}
-                            className="grid grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
+                            className="grid grid-cols-[62px_minmax(110px,1.4fr)_76px_88px] sm:grid-cols-[72px_minmax(130px,1.4fr)_86px_104px_minmax(120px,1.2fr)_90px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer"
                           >
                             <div className="font-mono-tabular font-semibold text-blue-600 dark:text-blue-400">
                               #{w.cocaHeadwordDerivedRank?.toLocaleString()}
                             </div>
                             <div
                               translate="no"
-                              className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate"
+                              className="font-serif-lexicon font-semibold text-sm text-[var(--text-primary)] truncate pr-2"
                             >
                               {w.word}
                             </div>
-                            <div className="flex items-center gap-1 font-mono-tabular">
+                            <div className="flex items-center gap-1 font-mono-tabular truncate">
                               {meta && (
                                 <span
                                   className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${meta.badgeClass}`}
@@ -699,14 +695,14 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
                                 </span>
                               )}
                             </div>
-                            <div className="text-right pr-3 font-mono-tabular font-semibold text-[var(--text-primary)]">
+                            <div className="text-right sm:pr-3 font-mono-tabular font-semibold text-[var(--text-primary)]">
                               {w.cocaHeadwordTotalFreq?.toLocaleString()}
                             </div>
-                            <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)]">
+                            <div className="hidden sm:block font-mono-tabular text-[11px] text-[var(--text-secondary)]">
                               最佳 #{w.cocaBestPosRank?.toLocaleString()} · H=
                               {w.cocaPosEntropy?.toFixed(2)}
                             </div>
-                            <div className="text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
+                            <div className="hidden sm:block text-right font-mono-tabular text-[11px] text-[var(--text-muted)]">
                               {[w.band, w.isCet4 ? 'CET-4' : w.isCet6 ? 'CET-6' : null]
                                 .filter(Boolean)
                                 .join(' · ') || '—'}
@@ -1093,46 +1089,51 @@ export const CorpusLabView: React.FC<CorpusLabViewProps> = ({
         {/* ==================================================================== */}
         {activeTab === 'pos_analytics' && (
           <div className="p-4 sm:p-5 space-y-4 max-w-7xl mx-auto">
-            <div className="p-3.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2.5 text-xs">
-                <span className="font-semibold text-[var(--text-secondary)]">最少词性数:</span>
+            <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] flex flex-wrap lg:flex-nowrap items-center justify-between gap-2 text-xs">
+              <div className="inline-flex items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 shrink-0">
+                <span className="px-2 text-[11px] font-semibold text-[var(--text-muted)] whitespace-nowrap">
+                  词性数:
+                </span>
                 {[2, 3, 4, 5].map((cnt) => (
                   <button
                     key={cnt}
                     type="button"
                     onClick={() => setMinPosCount(cnt)}
-                    className={`px-2.5 py-1 rounded border font-mono-tabular cursor-pointer ${
+                    className={`px-2 py-1 rounded font-mono-tabular whitespace-nowrap cursor-pointer ${
                       minPosCount === cnt
-                        ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)] text-[var(--accent-primary)] font-semibold'
-                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    ≥{cnt} 种词性
+                    ≥{cnt}性
                   </button>
                 ))}
+              </div>
 
-                <select
-                  value={posSortBy}
-                  onChange={(e) => setPosSortBy(e.target.value as typeof posSortBy)}
-                  aria-label="多词性排序方式"
-                  className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
-                >
-                  <option value="pos_count_desc">按词性种类数降序 (如 like 7词性)</option>
-                  <option value="entropy_desc">按香农信息熵 H 降序 (多词性最均衡)</option>
-                  <option value="freq_desc">按词头合计频次降序 (如 work / right)</option>
-                </select>
+              <select
+                value={posSortBy}
+                onChange={(e) => setPosSortBy(e.target.value as typeof posSortBy)}
+                aria-label="多词性排序方式"
+                className="px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs shrink-0 cursor-pointer"
+              >
+                <option value="pos_count_desc">按词性种类数降序 (如 like 7性)</option>
+                <option value="entropy_desc">按香农信息熵 H 降序 (多词性最均衡)</option>
+                <option value="freq_desc">按词头合计频次降序 (如 work / right)</option>
+              </select>
 
+              <div className="relative flex-1 min-w-[140px]">
+                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="search"
                   value={posQuery}
                   onChange={(e) => setPosQuery(e.target.value)}
                   placeholder="检索多词性词 (如 like, work, run)…"
-                  className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs w-52"
+                  className="w-full pl-8 pr-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 />
               </div>
 
-              <div className="text-xs font-mono-tabular text-[var(--text-muted)]">
-                匹配 {multiPosHeadwords.length.toLocaleString()} 个多词性词头
+              <div className="font-mono-tabular text-[11px] text-[var(--text-muted)] whitespace-nowrap shrink-0">
+                共 {multiPosHeadwords.length.toLocaleString()} 词头
               </div>
             </div>
 

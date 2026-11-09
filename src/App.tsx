@@ -85,7 +85,31 @@ export function App() {
   );
 
   const [selectedWordId, setSelectedWordId] = useState<string | null>('work');
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(true);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1280;
+    }
+    return true;
+  });
+  const prevIsWideRef = useRef<boolean>(
+    typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      const isWide = window.innerWidth >= 1280;
+      if (prevIsWideRef.current && !isWide) {
+        setIsDrawerOpen(false);
+      } else if (!prevIsWideRef.current && isWide) {
+        setIsDrawerOpen(true);
+      }
+      prevIsWideRef.current = isWide;
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>('work');
   const [familyHighlightWordId, setFamilyHighlightWordId] = useState<string | null>(null);
   const [isCommandModalOpen, setIsCommandModalOpen] = useState<boolean>(false);
@@ -248,10 +272,28 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandModalOpen((prev) => !prev);
+      } else if (e.key === 'Escape' && window.innerWidth < 1280) {
+        setIsDrawerOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleWorkspaceChange = useCallback((nextTab: NavigationTab) => {
+    setActiveTab(nextTab);
+    if (
+      nextTab === 'insights' ||
+      nextTab === 'data_studio' ||
+      nextTab === 'families' ||
+      nextTab === 'study'
+    ) {
+      // Macro analytics, dataset management, 3-column family studio, and 2-column study planner
+      // work best at full width; the single-word inspector opens on demand when a specific word is clicked.
+      setIsDrawerOpen(false);
+    } else if (nextTab === 'explore' && typeof window !== 'undefined' && window.innerWidth >= 1280) {
+      setIsDrawerOpen(true);
+    }
   }, []);
 
   const staticCollections = useMemo(
@@ -631,40 +673,27 @@ export function App() {
     shortLabel: string;
     icon: React.FC<{ className?: string }>;
   }[] = [
-    { id: 'explore', label: '词汇探索', shortLabel: '探索', icon: Compass },
-    { id: 'corpus_lab', label: '语料实验室', shortLabel: '语料', icon: FlaskConical },
-    { id: 'families', label: '词族图谱', shortLabel: '词族', icon: Layers },
-    { id: 'study', label: '学习工作台', shortLabel: '学习', icon: BookmarkCheck },
-    { id: 'insights', label: '学习洞察', shortLabel: '洞察', icon: BarChart3 },
-    { id: 'data_studio', label: '数据中心', shortLabel: '数据', icon: Database },
+    { id: 'explore', label: '检索', shortLabel: '检索', icon: Compass },
+    { id: 'corpus_lab', label: '语料', shortLabel: '语料', icon: FlaskConical },
+    { id: 'families', label: '词族', shortLabel: '词族', icon: Layers },
+    { id: 'study', label: '学习', shortLabel: '学习', icon: BookmarkCheck },
+    { id: 'insights', label: '洞察', shortLabel: '洞察', icon: BarChart3 },
+    { id: 'data_studio', label: '数据', shortLabel: '数据', icon: Database },
   ];
 
   return (
     <div className="h-[100dvh] flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)] overflow-hidden">
       {/* 3-Zone Top Header Bar */}
-      <header className="h-12 px-3 sm:px-5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 shrink-0 z-20">
-        {/* Zone 1: Brand Identity */}
-        <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-[var(--accent-primary)] flex items-center justify-center text-white font-serif-lexicon font-bold text-sm shadow-2xs shrink-0">
-            L
-          </div>
-          <div className="flex items-baseline gap-2 min-w-0">
-            <span className="font-serif-lexicon font-bold text-sm sm:text-base tracking-tight text-[var(--text-primary)] truncate">
-              Lexical Workbench
-            </span>
-            <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold">
-              2.0
-            </span>
-            <span className="hidden 2xl:inline text-[11px] font-mono-tabular text-[var(--text-muted)] truncate">
-              COCA 60k · BNC 25k族 · CET 考纲
-            </span>
-          </div>
-        </div>
+      <header className="h-12 px-3.5 sm:px-5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-4 shrink-0 z-20">
+        {/* Zone 1: Single-line Brand Wordmark */}
+        <span className="font-serif-lexicon font-bold text-base tracking-tight text-[var(--text-primary)] whitespace-nowrap shrink-0 select-none">
+          Lexical Workbench
+        </span>
 
         {/* Zone 2: Desktop 6-Workspace Navigation */}
         <nav
           aria-label="主工作区导航"
-          className="hidden md:flex items-center gap-0.5 bg-[var(--bg-subtle)] p-1 rounded-lg border border-[var(--border-subtle)]"
+          className="hidden md:flex items-center gap-1 bg-[var(--bg-subtle)] p-1 rounded-lg border border-[var(--border-subtle)] shrink-0"
         >
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -673,14 +702,14 @@ export function App() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id)}
-                className={`px-2.5 lg:px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer focus-ring ${
+                onClick={() => handleWorkspaceChange(item.id)}
+                className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-all cursor-pointer focus-ring ${
                   isActive
                     ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] shadow-2xs font-semibold'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                 <span>{item.label}</span>
               </button>
             );
@@ -688,24 +717,45 @@ export function App() {
         </nav>
 
         {/* Zone 3: Global Command Search & Theme Toggle */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => setIsCommandModalOpen(true)}
-            className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--border-strong)] text-xs text-[var(--text-secondary)] inline-flex items-center gap-2 transition-colors cursor-pointer focus-ring"
+            className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:border-[var(--border-strong)] text-xs text-[var(--text-secondary)] inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring"
             title="全局词库快速检索 (Ctrl+K / ⌘K)"
           >
-            <Search className="w-3.5 h-3.5 text-[var(--accent-primary)]" aria-hidden="true" />
-            <span className="hidden sm:inline">全局检索…</span>
+            <Search className="w-3.5 h-3.5 text-[var(--accent-primary)] shrink-0" aria-hidden="true" />
+            <span className="hidden sm:inline">全局检索</span>
             <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[var(--bg-subtle)] rounded border border-[var(--border-subtle)] text-[var(--text-muted)]">
               ⌘K
             </kbd>
           </button>
 
+          {selectedWord && activeTab !== 'insights' && (
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen((o) => !o)}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring ${
+                isDrawerOpen
+                  ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+              title={isDrawerOpen ? '收起右侧词条详情面板 (Esc)' : `展开词条详情 (${selectedWord.word})`}
+            >
+              <span>详情</span>
+              <span
+                translate="no"
+                className="hidden sm:inline font-serif-lexicon font-bold max-w-[84px] truncate"
+              >
+                · {selectedWord.word}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setDarkMode((d) => !d)}
-            className="p-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] cursor-pointer focus-ring"
+            className="p-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] shrink-0 cursor-pointer focus-ring"
             title={darkMode ? '切换至浅色模式' : '切换至深色模式'}
             aria-label={darkMode ? '切换至浅色模式' : '切换至深色模式'}
           >
@@ -965,27 +1015,37 @@ export function App() {
           )}
         </main>
 
-        {/* Right Persistent Research Inspector Sheet */}
-        {isDrawerOpen && selectedWord && (
-          <WordDetailDrawer
-            word={selectedWord}
-            onClose={() => setIsDrawerOpen(false)}
-            wordsMap={wordsMap}
-            familiesMap={familiesMap}
-            userRecord={userRecordsMap.get(selectedWord.id)}
-            allUserRecordsMap={userRecordsMap}
-            collections={collections}
-            dictionaries={dictionaries}
-            wordLogs={selectedWordLogs}
-            onStatusChange={handleStatusChange}
-            onPosStatusChange={handlePosStatusChange}
-            onTagsChange={handleTagsChange}
-            onNoteChange={handleNoteChange}
-            onTouchStudyRecord={handleTouchStudyRecord}
-            onToggleWordInCollection={handleToggleWordInCollection}
-            onSelectWord={(w) => handleSelectWord(w, true)}
-            onInspectFamily={handleInspectFamily}
-          />
+        {/* Right Persistent Research Inspector Sheet:
+            - At >=1280px (xl): docks side-by-side without blocking main view
+            - At 640px–1279px (sm..lg): non-modal floating right sheet (neither reflows/shrinks the main table NOR dims/blocks the left workspace!)
+            - At <640px (mobile): full-width sheet */}
+        {isDrawerOpen && selectedWord && activeTab !== 'insights' && (
+          <>
+            <div
+              onClick={() => setIsDrawerOpen(false)}
+              className="sm:hidden fixed inset-0 top-12 bottom-12 bg-slate-950/30 z-30"
+              aria-hidden="true"
+            />
+            <WordDetailDrawer
+              word={selectedWord}
+              onClose={() => setIsDrawerOpen(false)}
+              wordsMap={wordsMap}
+              familiesMap={familiesMap}
+              userRecord={userRecordsMap.get(selectedWord.id)}
+              allUserRecordsMap={userRecordsMap}
+              collections={collections}
+              dictionaries={dictionaries}
+              wordLogs={selectedWordLogs}
+              onStatusChange={handleStatusChange}
+              onPosStatusChange={handlePosStatusChange}
+              onTagsChange={handleTagsChange}
+              onNoteChange={handleNoteChange}
+              onTouchStudyRecord={handleTouchStudyRecord}
+              onToggleWordInCollection={handleToggleWordInCollection}
+              onSelectWord={(w) => handleSelectWord(w, true)}
+              onInspectFamily={handleInspectFamily}
+            />
+          </>
         )}
       </div>
 
@@ -1001,7 +1061,7 @@ export function App() {
             <button
               key={item.id}
               type="button"
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => handleWorkspaceChange(item.id)}
               className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium cursor-pointer ${
                 isActive ? 'text-[var(--accent-primary)] font-semibold' : 'text-[var(--text-muted)]'
               }`}

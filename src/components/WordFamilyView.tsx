@@ -567,8 +567,8 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                 </div>
 
                 {/* Interactive SVG Radial / Layered Relation Graph */}
-                <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] p-3 overflow-x-auto">
-                  <svg viewBox="0 0 720 340" className="w-full min-w-[540px] h-72">
+                <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] p-3 overflow-hidden">
+                  <svg viewBox="0 0 720 340" className="w-full h-64 sm:h-72">
                     {/* Center Node: Family Headword */}
                     <g
                       onClick={() => headwordItem && onSelectWord(headwordItem)}
@@ -943,8 +943,13 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                               #{entry.cocaBestPosRank}
                             </span>
                             {entry.cocaPrimaryPos && (
-                              <span className="text-[10px] text-[var(--text-muted)]">
-                                {COCA_POS_META[entry.cocaPrimaryPos]?.shortLabel}
+                              <span
+                                className={`px-1 py-0.2 rounded text-[9px] font-semibold ${
+                                  COCA_POS_META[entry.cocaPrimaryPos]?.badgeClass ||
+                                  'bg-[var(--bg-subtle)] text-[var(--text-secondary)]'
+                                }`}
+                              >
+                                {COCA_POS_META[entry.cocaPrimaryPos]?.shortLabel.split(' ')[0]}
                                 {(entry.cocaPosCount || 0) > 1 ? `+${(entry.cocaPosCount || 1) - 1}` : ''}
                               </span>
                             )}
@@ -955,14 +960,14 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                       </div>
 
                       {/* CET */}
-                      <div className="text-xs font-mono-tabular whitespace-nowrap">
+                      <div className="text-[10px] font-mono-tabular whitespace-nowrap">
                         {entry?.isCet4 && (
-                          <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                          <span className="px-1 py-0.2 rounded bg-teal-500/12 text-teal-700 dark:text-teal-300 font-semibold">
                             CET-4
                           </span>
                         )}
                         {!entry?.isCet4 && entry?.isCet6 && (
-                          <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
+                          <span className="px-1 py-0.2 rounded bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 font-semibold">
                             CET-6
                           </span>
                         )}
@@ -1041,9 +1046,9 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
         </div>
       )}
 
-      {/* Zone 3: Right Family Structure & Syllabus Panel (xl+ 300px) */}
+      {/* Zone 3: Right Family Structure & Syllabus Panel (2xl+ 290px) */}
       {activeFamily && (
-        <aside className="hidden xl:flex xl:w-[300px] border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full overflow-y-auto divide-y divide-[var(--border-subtle)]">
+        <aside className="hidden 2xl:flex 2xl:w-[290px] border-l border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 h-full overflow-y-auto divide-y divide-[var(--border-subtle)]">
           <div className="p-4 space-y-3">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
               词族掌握与多源覆盖
@@ -1112,56 +1117,75 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
 
           <div className="p-4 space-y-2.5">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-              CET-4 / CET-6 官方大纲溯源 ({familyStats.cetRefs.length})
+              四六级考纲同组词与派生簇 ({familyStats.cetRefs.length})
             </h3>
             {familyStats.cetRefs.length === 0 ? (
               <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                该词族下暂无收录于 2016 版大学英语四六级大纲的词形。
+                该词族下暂无收录于大学英语四六级大纲的词形。
               </p>
             ) : (
               <div className="space-y-2">
                 {familyStats.cetRefs.map((ref, i) => {
                   const rawWords = ref.rawLine
                     .split('\t')
-                    .map((s) => s.trim().replace(/^★/, ''))
+                    .map((s) =>
+                      s
+                        .trim()
+                        .replace(/^★/, '')
+                        .replace(/[¹²³⁴⁵]/g, '')
+                        .trim()
+                    )
                     .filter(Boolean);
+                  const mainWord = rawWords[0] || '';
+                  const siblingWords = rawWords.slice(1);
                   return (
                     <div
                       key={i}
-                      className="p-2.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded space-y-1.5"
+                      className="p-2.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded space-y-2"
                     >
-                      <div className="flex items-center justify-between text-[11px] font-mono-tabular text-[var(--text-muted)]">
-                        <span>大纲行号 #{ref.lineNumber}</span>
-                        <span className="font-semibold text-[var(--text-secondary)]">
-                          {ref.level === 'CET6' ? 'CET-6' : 'CET-4'}
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          translate="no"
+                          onClick={() => {
+                            const w = wordsMap.get(mainWord.toLowerCase());
+                            if (w) onSelectWord(w);
+                          }}
+                          className="font-serif-lexicon font-bold text-xs text-[var(--text-primary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                        >
+                          {mainWord}
+                        </button>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-semibold ${
+                            ref.level === 'CET6'
+                              ? 'bg-indigo-500/12 text-indigo-700 dark:text-indigo-300'
+                              : 'bg-teal-500/12 text-teal-700 dark:text-teal-300'
+                          }`}
+                        >
+                          {ref.level === 'CET6' ? 'CET-6 六级核心' : 'CET-4 四级核心'}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-1 text-xs font-serif-lexicon">
-                        {rawWords.map((token, idx) => {
-                          const clean = token
-                            .replace(/^★/, '')
-                            .replace(/[¹²³⁴⁵]/g, '')
-                            .trim();
-                          return (
-                            <React.Fragment key={idx}>
-                              {idx > 0 && (
-                                <ChevronRight className="w-3 h-3 text-[var(--text-muted)]" />
-                              )}
-                              <button
-                                type="button"
-                                translate="no"
-                                onClick={() => {
-                                  const w = wordsMap.get(clean.toLowerCase());
-                                  if (w) onSelectWord(w);
-                                }}
-                                className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] hover:text-[var(--accent-primary)] font-medium text-[var(--text-primary)] cursor-pointer"
-                              >
-                                {token}
-                              </button>
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
+                      {siblingWords.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-[var(--border-subtle)]">
+                          <span className="text-[10px] text-[var(--text-muted)] mr-0.5">
+                            同组派生:
+                          </span>
+                          {siblingWords.map((token, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              translate="no"
+                              onClick={() => {
+                                const w = wordsMap.get(token.toLowerCase());
+                                if (w) onSelectWord(w);
+                              }}
+                              className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] font-serif-lexicon font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] cursor-pointer"
+                            >
+                              {token}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

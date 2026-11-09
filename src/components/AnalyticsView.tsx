@@ -41,6 +41,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const [rightMatrixTab, setRightMatrixTab] = useState<'coca_tiers' | 'bnc_bands'>('coca_tiers');
   const [cocaCoverageMode, setCocaCoverageMode] = useState<'headword' | 'explicit_pos'>('headword');
   const [bandViewRange, setBandViewRange] = useState<'all' | '1_10' | '11_25'>('all');
+  const [mobileInsightsPane, setMobileInsightsPane] = useState<'overview' | 'matrix'>('overview');
 
   const stats = useMemo(() => {
     const core = computeLexiconAnalytics(
@@ -113,8 +114,40 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   return (
     <div className="flex flex-col lg:flex-row h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
+      {/* Tablet/Mobile Pane Switcher (<1024px) to prevent vertical stacking */}
+      <div className="lg:hidden px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 shrink-0">
+        <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setMobileInsightsPane('overview')}
+            className={`px-3 py-1 rounded cursor-pointer whitespace-nowrap ${
+              mobileInsightsPane === 'overview'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            五层掌握度与加权覆盖
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileInsightsPane('matrix')}
+            className={`px-3 py-1 rounded cursor-pointer whitespace-nowrap ${
+              mobileInsightsPane === 'matrix'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            COCA 梯队与 BNC 频段矩阵
+          </button>
+        </div>
+      </div>
+
       {/* Left Pane: 5-Layer Mastery Cards + 3 Frequency-Weighted Coverage Metrics + Activity */}
-      <aside className="w-full lg:w-[390px] xl:w-[440px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-col shrink-0 h-full min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)]">
+      <aside
+        className={`w-full lg:w-[390px] xl:w-[430px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 flex-1 lg:flex-none lg:h-full min-h-0 overflow-y-auto divide-y divide-[var(--border-subtle)] ${
+          mobileInsightsPane === 'overview' ? 'flex' : 'hidden lg:flex'
+        }`}
+      >
         {/* Section 1: 5-Layer Multi-Granularity Mastery Breakdown */}
         <div className="p-4 space-y-3 bg-[var(--bg-surface)]">
           <div className="flex items-center justify-between">
@@ -222,7 +255,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 </div>
               </div>
               <div>
-                <div className="text-[10px] text-[var(--text-muted)]">★ CET-6 六级新增</div>
+                <div className="text-[10px] text-[var(--text-muted)]">CET-6 六级新增</div>
                 <div className="font-bold text-[var(--text-primary)]">
                   词形 {stats.cet6OnlyFormsMastered}/{stats.cet6OnlyFormsTotal}
                 </div>
@@ -359,30 +392,34 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       </aside>
 
       {/* Right Pane: Switchable COCA Rank Interval Coverage & BNC 1k-25k Band Matrix */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-          <div className="flex items-center gap-1.5">
+      <div
+        className={`flex-1 flex-col min-w-0 min-h-0 h-full bg-[var(--bg-surface)] overflow-hidden ${
+          mobileInsightsPane === 'matrix' ? 'flex' : 'hidden lg:flex'
+        }`}
+      >
+        <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setRightMatrixTab('coca_tiers')}
-              className={`px-3 py-1 rounded text-xs font-medium cursor-pointer ${
+              className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer ${
                 rightMatrixTab === 'coca_tiers'
                   ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              COCA 2020 排名梯队掌握矩阵 (Top 1k–60k)
+              COCA 排名梯队矩阵 (1k–60k)
             </button>
             <button
               type="button"
               onClick={() => setRightMatrixTab('bnc_bands')}
-              className={`px-3 py-1 rounded text-xs font-medium cursor-pointer ${
+              className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer ${
                 rightMatrixTab === 'bnc_bands'
                   ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              BNC/COCA 1k–25k 词族四态覆盖矩阵
+              BNC 1k–25k 词族四态矩阵
             </button>
           </div>
 
@@ -447,10 +484,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-[150px_110px_100px_1fr_72px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
               <div>COCA 排名区间</div>
               <div>已掌握 / 总数</div>
-              <div>在学与待学</div>
+              <div className="hidden sm:block">在学与待学</div>
               <div>区间掌握与在学进度条</div>
               <div className="text-right">掌握率</div>
             </div>
@@ -479,14 +516,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         maxCocaRank: row.maxRank,
                       })
                     }
-                    className="grid grid-cols-[150px_110px_100px_1fr_72px] items-center px-4 py-3 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className="grid grid-cols-[125px_90px_1fr_60px] sm:grid-cols-[172px_104px_82px_1fr_68px] items-center px-4 py-3 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                   >
-                    <div className="font-bold text-[var(--text-primary)]">{row.tierLabel}</div>
+                    <div className="font-bold text-[var(--text-primary)] truncate pr-2">
+                      {row.tierLabel}
+                    </div>
                     <div className="text-[var(--text-secondary)]">
                       {mastered.toLocaleString()} / {total.toLocaleString()}
                     </div>
-                    <div className="text-[var(--text-muted)]">{active.toLocaleString()}</div>
-                    <div className="pr-4 flex items-center gap-2">
+                    <div className="hidden sm:block text-[var(--text-muted)]">
+                      {active.toLocaleString()}
+                    </div>
+                    <div className="pr-3 sm:pr-4 flex items-center gap-2">
                       <div className="flex-1 h-2.5 bg-[var(--bg-subtle)] rounded-xs overflow-hidden flex">
                         <div
                           className="h-full bg-emerald-500 transition-all"
@@ -512,11 +553,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         ) : (
           /* ================= BNC 1k-25k 4-STATE BAND MATRIX ================= */
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="grid grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+            <div className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
               <div>频段</div>
               <div>词族四态 (完/部/触/未)</div>
-              <div>词形掌握</div>
-              <div>COCA/考纲</div>
+              <div className="hidden sm:block">词形掌握</div>
+              <div className="hidden sm:block">COCA/考纲</div>
               <div>掌握与在学进度谱</div>
               <div className="text-right">掌握率</div>
             </div>
@@ -537,14 +578,14 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                         bands: [row.bandNum],
                       })
                     }
-                    className="grid grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 py-2.5 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                    className="grid grid-cols-[58px_115px_1fr_52px] sm:grid-cols-[62px_135px_96px_76px_1fr_56px] items-center px-4 py-2.5 text-xs font-mono-tabular hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
                   >
                     <div className="font-bold text-[var(--text-primary)]">
                       BNC {row.bandLabel}
                     </div>
 
                     <div
-                      className="text-[11px] text-[var(--text-secondary)]"
+                      className="text-[11px] text-[var(--text-secondary)] truncate pr-2"
                       title={`完整掌握: ${row.fullMasteredFamilies} | 部分掌握: ${row.partialMasteredFamilies} | 已接触(在学/待学): ${row.touchedFamilies} | 未接触: ${untouchedFamilies}`}
                     >
                       <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
@@ -557,11 +598,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                       /<span className="text-[var(--text-muted)]">{untouchedFamilies}</span>
                     </div>
 
-                    <div className="text-[var(--text-secondary)]">
+                    <div className="hidden sm:block text-[var(--text-secondary)]">
                       {row.masteredWords.toLocaleString()} / {row.wordCount.toLocaleString()}
                     </div>
 
-                    <div className="text-[11px] text-[var(--text-muted)]">
+                    <div className="hidden sm:block text-[11px] text-[var(--text-muted)]">
                       C:{row.cocaWordsInBand} · E:{row.cetWordsInBand}
                     </div>
 

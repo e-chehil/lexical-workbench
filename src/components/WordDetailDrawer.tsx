@@ -210,7 +210,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
   return (
     <aside
       style={{ '--inspector-width': `${effectiveWidth}px` } as React.CSSProperties}
-      className="fixed inset-x-0 bottom-0 top-12 md:static md:inset-auto z-40 w-full md:w-[var(--inspector-width)] md:max-w-[55vw] md:border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-col h-[calc(100dvh-3rem)] md:h-full shrink-0 shadow-2xl md:shadow-none overflow-hidden select-text relative"
+      className="fixed right-0 bottom-12 md:bottom-0 top-12 xl:relative xl:inset-auto z-40 w-full sm:w-[396px] xl:w-[var(--inspector-width)] xl:max-w-[40vw] border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-col xl:h-full shrink-0 shadow-2xl xl:shadow-none overflow-hidden select-text"
       aria-label={`词条研究详情: ${word.word}`}
     >
       {/* Desktop Left Drag-to-Resize Handle */}
@@ -223,7 +223,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
           document.body.style.userSelect = 'none';
         }}
         title="左右拖动调整研究检视面板宽度"
-        className="hidden md:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[var(--accent-primary)]/40 transition-colors z-20"
+        className="hidden xl:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[var(--accent-primary)]/40 transition-colors z-20"
       />
 
       {/* Top Sticky Word Header */}
@@ -289,7 +289,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
               )}
               {word.isCet6 && (
                 <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-semibold">
-                  {word.isCet6Only ? '★CET-6新增' : 'CET-6'}
+                  CET-6
                 </span>
               )}
             </div>
@@ -299,7 +299,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
             <button
               type="button"
               onClick={() => setIsExpandedWidth((v) => !v)}
-              className="hidden md:inline-flex p-1.5 rounded-md hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+              className="hidden xl:inline-flex p-1.5 rounded-md hover:bg-[var(--bg-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
               title={isExpandedWidth ? '恢复标准检视宽度' : '展开宽屏检视面板'}
               aria-label="切换面板宽度"
             >
@@ -362,28 +362,50 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
           </button>
         </div>
 
-        {/* 5-Tab Research Navigation */}
-        <div className="mt-3 -mx-4 px-4 border-t border-[var(--border-subtle)] pt-2 flex items-center gap-1 overflow-x-auto no-scrollbar">
+        {/* Always-Visible Authoritative Dictionary Quick-Jump Bar */}
+        {enabledDictionaries.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]/70 flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] font-semibold text-[var(--text-muted)] shrink-0 mr-0.5">
+              权威词典:
+            </span>
+            {enabledDictionaries.map((dict) => (
+              <a
+                key={dict.id}
+                href={buildDictionaryUrl(dict.urlTemplate, word.word)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`${dict.name} — ${dict.description}`}
+                className="px-1.5 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent-primary)] text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--accent-primary)] inline-flex items-center gap-0.5 whitespace-nowrap transition-colors"
+              >
+                <span>{dict.shortName || dict.name}</span>
+                <ExternalLink className="w-2.5 h-2.5 opacity-75" />
+              </a>
+            ))}
+          </div>
+        )}
+
+        {/* 5-Tab Research Navigation (Full-Width 5-Col Grid, Zero Clipping) */}
+        <div className="mt-2.5 -mx-4 px-4 border-t border-[var(--border-subtle)] pt-2 grid grid-cols-5 gap-1">
           {[
             { id: 'overview', label: '概览', icon: BookOpen },
             {
               id: 'frequency',
-              label: `语料频次 (${(word.cocaLexemes || []).length > 0 ? `${(word.cocaLexemes || []).length}词性` : 'BNC'})`,
+              label: `语料(${(word.cocaLexemes || []).length || 'BNC'})`,
               icon: BarChart3,
             },
             {
               id: 'relations',
-              label: `关系图谱 (${lexicalRelations.length})`,
+              label: `关系(${lexicalRelations.length})`,
               icon: GitBranch,
             },
             {
               id: 'learning',
-              label: `学习与词性 (${Object.keys(currentPosStatuses).length || (currentStatus !== 'unrated' ? 1 : 0)})`,
+              label: '学习笔记',
               icon: GraduationCap,
             },
             {
               id: 'dictionaries',
-              label: `词典 (${enabledDictionaries.length})`,
+              label: `词典(${enabledDictionaries.length})`,
               icon: ExternalLink,
             },
           ].map((tab) => {
@@ -394,14 +416,14 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as InspectorTab)}
-                className={`px-2.5 py-1 rounded text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                className={`py-1 px-1 rounded text-[11px] font-medium inline-flex items-center justify-center gap-1 whitespace-nowrap transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
+                <Icon className="w-3 h-3 shrink-0" />
+                <span className="truncate">{tab.label}</span>
               </button>
             );
           })}
@@ -427,10 +449,10 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
               <div className="grid grid-cols-2 gap-2.5">
                 {/* COCA 2020 Card */}
                 <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
-                  <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-                    <span>COCA 2020 词元频次</span>
+                  <div className="flex items-center justify-between gap-1 text-[11px] text-[var(--text-muted)]">
+                    <span className="truncate">COCA 2020 词元</span>
                     {word.inCoca && (
-                      <span className="font-mono-tabular text-blue-600 dark:text-blue-400 font-semibold">
+                      <span className="font-mono-tabular text-blue-600 dark:text-blue-400 font-semibold whitespace-nowrap shrink-0">
                         {word.cocaPosCount} 种词性
                       </span>
                     )}
@@ -439,7 +461,7 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                     {word.cocaHeadwordTotalFreq !== null && word.cocaHeadwordTotalFreq !== undefined ? (
                       <>
                         {word.cocaHeadwordTotalFreq.toLocaleString()}
-                        <span className="ml-1.5 text-xs font-normal text-[var(--text-secondary)]">
+                        <span className="ml-1.5 text-xs font-normal text-[var(--text-secondary)] whitespace-nowrap">
                           (合计 #{word.cocaHeadwordDerivedRank?.toLocaleString()})
                         </span>
                       </>
@@ -457,24 +479,24 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-[11px] font-mono-tabular text-[var(--text-secondary)]">
+                  <div className="mt-1 text-[11px] font-mono-tabular text-[var(--text-secondary)] truncate">
                     {word.inCoca ? (
                       <>
-                        最高排名 #{word.cocaBestPosRank?.toLocaleString()} ({word.cocaPrimaryPos} · 占{' '}
+                        最高 #{word.cocaBestPosRank?.toLocaleString()} ({word.cocaPrimaryPos} · 占{' '}
                         {Math.round(word.cocaDominantPosSharePct || 0)}%)
                       </>
                     ) : (
-                      'COCA 仅统计词元+词性，不单列屈折变形'
+                      'COCA 仅统计词元+词性'
                     )}
                   </div>
                 </div>
 
                 {/* BNC/COCA 2.0 Family & Form Card */}
                 <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
-                  <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-                    <span>BNC 词形与词族</span>
+                  <div className="flex items-center justify-between gap-1 text-[11px] text-[var(--text-muted)]">
+                    <span className="truncate">BNC 词形与词族</span>
                     {word.band && (
-                      <span className="font-mono-tabular font-semibold text-[var(--text-secondary)]">
+                      <span className="font-mono-tabular font-semibold text-[var(--text-secondary)] whitespace-nowrap shrink-0">
                         {word.band} 频段
                       </span>
                     )}
@@ -614,47 +636,121 @@ export const WordDetailDrawer: React.FC<WordDetailDrawerProps> = ({
               )}
             </div>
 
-            {/* 2. CET2016 Official Syllabus Provenance */}
+            {/* 2. CET2016 Learner-Centric Syllabus Group & Derivatives */}
             <div className="p-4 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-                  CET2016 官方考纲词目溯源 ({word.cetRefs.length})
+                  四六级考纲归属与同组派生词
                 </span>
                 {word.homographNumbers.length > 0 && (
-                  <span className="text-[11px] font-mono-tabular text-amber-700 dark:text-amber-400">
-                    同形异义词 #{word.homographNumbers.join(', #')}
+                  <span className="text-[11px] font-mono-tabular px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                    同形词义项 {word.homographNumbers.map((n) => `I`.repeat(n)).join(' / ')}
                   </span>
                 )}
               </div>
 
               {word.cetRefs.length === 0 ? (
                 <p className="text-xs text-[var(--text-muted)]">
-                  该词形未在 2016 版全国大学英语四、六级考试大纲词表中单列。
+                  该词为超纲词汇（未在四、六级考试大纲词表中单列）。
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {word.cetRefs.map((ref, idx) => (
-                    <div
-                      key={`${ref.lineNumber}-${idx}`}
-                      className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-xs space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-mono-tabular">
-                        <span className="font-semibold text-[var(--text-primary)]">
-                          {ref.level === 'CET6' ? '★ 六级新增词目' : '四级基准词目'} · 行号 #
-                          {ref.lineNumber}
-                        </span>
-                        <span translate="no" className="text-[var(--text-muted)]">
-                          原表记: {ref.rawMember}
-                        </span>
-                      </div>
+                  {word.cetRefs.map((ref, idx) => {
+                    const peerItems = (ref.peerForms || [])
+                      .filter((p) => p.toLowerCase() !== word.normalized)
+                      .map((p) => wordsMap.get(p.toLowerCase()) || null)
+                      .filter((w): w is LexiconWordItem => Boolean(w));
+                    const repWord =
+                      ref.representativeHeadword.toLowerCase() !== word.normalized
+                        ? wordsMap.get(ref.representativeHeadword.toLowerCase()) || null
+                        : null;
+
+                    return (
                       <div
-                        translate="no"
-                        className="font-serif-lexicon text-[var(--text-secondary)] bg-[var(--bg-surface)] px-2 py-1 rounded border border-[var(--border-subtle)]/70"
+                        key={`${ref.entryId}-${idx}`}
+                        className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] text-xs space-y-2"
                       >
-                        {ref.rawLine.split('\t').join('  ·  ')}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular font-semibold border ${
+                                ref.level === 'CET6'
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/70'
+                                  : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70'
+                              }`}
+                            >
+                              {ref.level === 'CET6' ? 'CET-6 六级核心' : 'CET-4 四级核心'}
+                            </span>
+                            <span className="text-[11px] text-[var(--text-secondary)]">
+                              {ref.role === 'headword' ? '考纲基准主词' : '考纲同组派生词'}
+                            </span>
+                          </div>
+                          {repWord && (
+                            <button
+                              type="button"
+                              translate="no"
+                              onClick={() => onSelectWord(repWord)}
+                              className="text-[11px] font-medium text-[var(--accent-primary)] hover:underline cursor-pointer"
+                            >
+                              归属主词: {repWord.word} →
+                            </button>
+                          )}
+                        </div>
+
+                        {peerItems.length > 0 ? (
+                          <div className="space-y-1.5 pt-1 border-t border-[var(--border-subtle)]/70">
+                            <div className="text-[11px] text-[var(--text-muted)]">
+                              同考纲词目关联词 / 派生词 ({peerItems.length}):
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {peerItems.map((peer) => {
+                                const peerPosMeta = peer.cocaPrimaryPos
+                                  ? COCA_POS_META[peer.cocaPrimaryPos]
+                                  : null;
+                                const peerSt =
+                                  allUserRecordsMap.get(peer.id)?.status || 'unrated';
+                                return (
+                                  <button
+                                    key={peer.id}
+                                    type="button"
+                                    translate="no"
+                                    onClick={() => onSelectWord(peer)}
+                                    className="px-2 py-1 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                                  >
+                                    <span className="font-serif-lexicon font-semibold text-xs text-[var(--text-primary)]">
+                                      {peer.word}
+                                    </span>
+                                    {peerPosMeta && (
+                                      <span
+                                        className={`px-1 py-0.2 rounded text-[9px] font-mono-tabular font-semibold border ${peerPosMeta.badgeClass}`}
+                                      >
+                                        {peerPosMeta.abbr}
+                                      </span>
+                                    )}
+                                    {peer.cocaBestPosRank && (
+                                      <span className="text-[10px] font-mono-tabular text-blue-600 dark:text-blue-400">
+                                        #{peer.cocaBestPosRank}
+                                      </span>
+                                    )}
+                                    {peerSt === 'mastered' && (
+                                      <span
+                                        className="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                        title="已掌握"
+                                      />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-[var(--text-muted)]">
+                            独立考纲词目（无考纲并列派生词）
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

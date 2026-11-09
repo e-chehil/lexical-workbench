@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ActivityLogEntry,
   BncCocaFamily,
@@ -33,6 +33,7 @@ import {
   XCircle,
   BookMarked,
   ListChecks,
+  RotateCcw,
 } from 'lucide-react';
 
 interface CollectionsAndPlannerViewProps {
@@ -134,6 +135,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
   const [studySubTab, setStudySubTab] = useState<'planner' | 'collections' | 'batch_sync'>(
     'planner'
   );
+  const [plannerMobilePane, setPlannerMobilePane] = useState<'candidates' | 'config'>('candidates');
 
   // Planner State
   const [strategy, setStrategy] = useState<MultiObjectiveStrategyId>('coca_high_freq');
@@ -147,6 +149,19 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
   const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [justCreated, setJustCreated] = useState(false);
+
+  // Continuous Drag-to-Lock & Shift+Click Range Lock State
+  const isDraggingLockRef = useRef(false);
+  const dragLockTargetValueRef = useRef(true);
+  const lastClickedLockIndexRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      isDraggingLockRef.current = false;
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, []);
 
   // Collections State
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>(
@@ -189,6 +204,62 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
     () => rawCandidates.filter((c) => c.isParetoOptimal).length,
     [rawCandidates]
   );
+
+  const totalWeightSum =
+    weights.cocaWeight + weights.bncWeight + weights.cetWeight + weights.gapWeight || 1;
+
+  const applyLockRange = (startIdx: number, endIdx: number, shouldLock: boolean) => {
+    const lo = Math.max(0, Math.min(startIdx, endIdx));
+    const hi = Math.min(plannerCandidates.length - 1, Math.max(startIdx, endIdx));
+    setLockedIds((prev) => {
+      const next = new Set(prev);
+      for (let i = lo; i <= hi; i++) {
+        const id = plannerCandidates[i]?.word.id;
+        if (!id) continue;
+        if (shouldLock) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const handleLockMouseDown = (idx: number, wordId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentlyLocked = lockedIds.has(wordId);
+    const targetVal = !currentlyLocked;
+
+    if (e.shiftKey && lastClickedLockIndexRef.current !== null) {
+      applyLockRange(lastClickedLockIndexRef.current, idx, targetVal);
+      lastClickedLockIndexRef.current = idx;
+      return;
+    }
+
+    isDraggingLockRef.current = true;
+    dragLockTargetValueRef.current = targetVal;
+    lastClickedLockIndexRef.current = idx;
+
+    setLockedIds((prev) => {
+      const next = new Set(prev);
+      if (targetVal) next.add(wordId);
+      else next.delete(wordId);
+      return next;
+    });
+  };
+
+  const handleLockRowMouseEnter = (idx: number, wordId: string) => {
+    if (!isDraggingLockRef.current) return;
+    const targetVal = dragLockTargetValueRef.current;
+    lastClickedLockIndexRef.current = idx;
+    setLockedIds((prev) => {
+      const has = prev.has(wordId);
+      if (targetVal && has) return prev;
+      if (!targetVal && !has) return prev;
+      const next = new Set(prev);
+      if (targetVal) next.add(wordId);
+      else next.delete(wordId);
+      return next;
+    });
+  };
 
   const handleSaveBatchAsCollection = () => {
     if (plannerCandidates.length === 0) return;
@@ -317,25 +388,25 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden">
       {/* Top Sub-Workspace Bar */}
-      <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+      <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setStudySubTab('planner')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               studySubTab === 'planner'
                 ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>多目标学习规划器 (Multi-Objective Planner)</span>
+            <span>多目标学习规划器</span>
           </button>
 
           <button
             type="button"
             onClick={() => setStudySubTab('collections')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               studySubTab === 'collections'
                 ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -348,14 +419,14 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
           <button
             type="button"
             onClick={() => setStudySubTab('batch_sync')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               studySubTab === 'batch_sync'
                 ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                 : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <ListChecks className="w-3.5 h-3.5" />
-            <span>批量导入与变更流水 ({activityLogs.length})</span>
+            <span>批量导入与流水 ({activityLogs.length})</span>
           </button>
         </div>
       </div>
@@ -365,8 +436,48 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
       {/* ==================================================================== */}
       {studySubTab === 'planner' && (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+          {/* Tablet/Mobile Pane Switcher (<1024px) to prevent vertical stacking */}
+          <div className="lg:hidden px-4 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex items-center justify-between gap-2 shrink-0">
+            <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setPlannerMobilePane('candidates')}
+                className={`px-2.5 py-1 rounded cursor-pointer whitespace-nowrap ${
+                  plannerMobilePane === 'candidates'
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] font-semibold shadow-2xs'
+                    : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                候选词列表 ({plannerCandidates.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlannerMobilePane('config')}
+                className={`px-2.5 py-1 rounded cursor-pointer whitespace-nowrap ${
+                  plannerMobilePane === 'config'
+                    ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] font-semibold shadow-2xs'
+                    : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                策略与四维权重配置
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveBatchAsCollection}
+              disabled={plannerCandidates.length === 0}
+              className="px-2.5 py-1 rounded bg-[var(--accent-primary)] text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+            >
+              {justCreated ? '已保存' : `保存批次 (${plannerCandidates.length})`}
+            </button>
+          </div>
+
           {/* Left Strategy & 4-Objective Weight Controls */}
-          <aside className="w-full lg:w-[350px] xl:w-[380px] border-b lg:border-b-0 lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 overflow-y-auto space-y-4 shrink-0">
+          <aside
+            className={`w-full lg:w-[340px] xl:w-[370px] lg:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 overflow-y-auto space-y-4 shrink-0 ${
+              plannerMobilePane === 'config' ? 'flex-1 lg:flex-none block' : 'hidden lg:block'
+            }`}
+          >
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">
                 1. 选择规划策略模式 (6 大预设策略)
@@ -389,59 +500,168 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
             </div>
 
             {/* 4 Transparent Objective Weight Sliders */}
-            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                  2. 四维评分透明权重调节
-                </span>
-                <span className="text-[10px] font-mono-tabular text-[var(--accent-primary)]">
-                  0–100 独立可解释分量
-                </span>
+            <div className="p-3.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-primary)] block">
+                    2. 四维评分透明权重调节
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    实时归一化配比 · 支持 0–100 独立调节
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeights(STRATEGY_META[strategy].defaultWeights)}
+                  title="重置为当前策略默认权重"
+                  className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-hover)] text-[10px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>重置权重</span>
+                </button>
               </div>
 
-              {[
-                {
-                  key: 'cocaWeight' as const,
-                  label: 'COCA 2020 当代词频价值',
-                  color: 'accent-blue-600',
-                },
-                {
-                  key: 'bncWeight' as const,
-                  label: 'BNC 词族频段与派生杠杆',
-                  color: 'accent-teal-600',
-                },
-                {
-                  key: 'cetWeight' as const,
-                  label: 'CET 四六级考纲相关性',
-                  color: 'accent-indigo-600',
-                },
-                {
-                  key: 'gapWeight' as const,
-                  label: '个人高频知识缺口紧迫度',
-                  color: 'accent-amber-600',
-                },
-              ].map((dim) => (
-                <div key={dim.key} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-[var(--text-secondary)]">{dim.label}</span>
-                    <span className="font-mono-tabular font-semibold text-[var(--text-primary)]">
-                      {weights[dim.key]}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={weights[dim.key]}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setWeights((prev) => ({ ...prev, [dim.key]: val }));
+              {/* 4-Color Live Proportion Bar */}
+              <div className="space-y-1.5">
+                <div className="h-2 w-full rounded-full overflow-hidden bg-[var(--bg-subtle)] flex p-0.5 gap-0.5">
+                  <div
+                    className="h-full bg-blue-600 rounded-l-full transition-all duration-150"
+                    style={{
+                      width: `${Math.round((weights.cocaWeight / totalWeightSum) * 100)}%`,
                     }}
-                    className={`w-full h-1.5 rounded-lg cursor-pointer ${dim.color}`}
+                    title={`COCA 词频占比 ${Math.round((weights.cocaWeight / totalWeightSum) * 100)}%`}
+                  />
+                  <div
+                    className="h-full bg-teal-600 transition-all duration-150"
+                    style={{
+                      width: `${Math.round((weights.bncWeight / totalWeightSum) * 100)}%`,
+                    }}
+                    title={`BNC 词族占比 ${Math.round((weights.bncWeight / totalWeightSum) * 100)}%`}
+                  />
+                  <div
+                    className="h-full bg-indigo-600 transition-all duration-150"
+                    style={{
+                      width: `${Math.round((weights.cetWeight / totalWeightSum) * 100)}%`,
+                    }}
+                    title={`CET 考纲占比 ${Math.round((weights.cetWeight / totalWeightSum) * 100)}%`}
+                  />
+                  <div
+                    className="h-full bg-amber-500 rounded-r-full transition-all duration-150"
+                    style={{
+                      width: `${Math.round((weights.gapWeight / totalWeightSum) * 100)}%`,
+                    }}
+                    title={`知识缺口占比 ${Math.round((weights.gapWeight / totalWeightSum) * 100)}%`}
                   />
                 </div>
-              ))}
+                <div className="grid grid-cols-4 gap-1 text-[10px] font-mono-tabular text-center">
+                  <span className="text-blue-600 dark:text-blue-400 font-semibold truncate">
+                    COCA {Math.round((weights.cocaWeight / totalWeightSum) * 100)}%
+                  </span>
+                  <span className="text-teal-600 dark:text-teal-400 font-semibold truncate">
+                    BNC {Math.round((weights.bncWeight / totalWeightSum) * 100)}%
+                  </span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-semibold truncate">
+                    CET {Math.round((weights.cetWeight / totalWeightSum) * 100)}%
+                  </span>
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold truncate">
+                    缺口 {Math.round((weights.gapWeight / totalWeightSum) * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-1 border-t border-[var(--border-subtle)]">
+                {[
+                  {
+                    key: 'cocaWeight' as const,
+                    label: 'COCA 2020 当代词频价值',
+                    shortCode: 'C',
+                    dotClass: 'bg-blue-600',
+                    fillClass: 'bg-blue-600',
+                    badgeClass:
+                      'bg-blue-500/12 text-blue-700 dark:text-blue-300 border-blue-500/25',
+                    hexColor: '#2563eb',
+                  },
+                  {
+                    key: 'bncWeight' as const,
+                    label: 'BNC 词族频段与派生杠杆',
+                    shortCode: 'B',
+                    dotClass: 'bg-teal-600',
+                    fillClass: 'bg-teal-600',
+                    badgeClass:
+                      'bg-teal-500/12 text-teal-700 dark:text-teal-300 border-teal-500/25',
+                    hexColor: '#0d9488',
+                  },
+                  {
+                    key: 'cetWeight' as const,
+                    label: 'CET 四六级考纲相关性',
+                    shortCode: 'E',
+                    dotClass: 'bg-indigo-600',
+                    fillClass: 'bg-indigo-600',
+                    badgeClass:
+                      'bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 border-indigo-500/25',
+                    hexColor: '#4f46e5',
+                  },
+                  {
+                    key: 'gapWeight' as const,
+                    label: '个人高频知识缺口紧迫度',
+                    shortCode: 'G',
+                    dotClass: 'bg-amber-500',
+                    fillClass: 'bg-amber-500',
+                    badgeClass:
+                      'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/25',
+                    hexColor: '#d97706',
+                  },
+                ].map((dim) => {
+                  const val = weights[dim.key];
+                  const sharePct = Math.round((val / totalWeightSum) * 100);
+                  return (
+                    <div key={dim.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${dim.dotClass}`} />
+                          <span className="text-[var(--text-primary)] font-medium truncate">
+                            {dim.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 font-mono-tabular">
+                          <span className="text-[10px] text-[var(--text-muted)]">
+                            占比 {sharePct}%
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded border text-[11px] font-bold min-w-[34px] text-center ${dim.badgeClass}`}
+                          >
+                            {val}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Custom Styled Range Track + Input */}
+                      <div className="relative h-5 flex items-center">
+                        <div className="absolute inset-x-0 h-1.5 rounded-full bg-[var(--bg-subtle)] overflow-hidden pointer-events-none">
+                          <div
+                            className={`h-full rounded-full transition-all duration-100 ${dim.fillClass}`}
+                            style={{ width: `${val}%` }}
+                          />
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          aria-label={dim.label}
+                          value={val}
+                          onChange={(e) => {
+                            const nextVal = Number(e.target.value);
+                            setWeights((prev) => ({ ...prev, [dim.key]: nextVal }));
+                          }}
+                          style={{ '--slider-color': dim.hexColor } as React.CSSProperties}
+                          className="lw-range-slider relative z-10 w-full"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Batch Size, Pareto Filter, Save Controls */}
@@ -538,14 +758,18 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
           </aside>
 
           {/* Right Candidate Preview Table with 4-Dimension Breakdown */}
-          <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[var(--bg-surface)] overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
-              <div>
-                <h2 className="text-xs sm:text-sm font-bold text-[var(--text-primary)]">
+          <div
+            className={`flex-1 flex-col min-w-0 min-h-0 bg-[var(--bg-surface)] overflow-hidden ${
+              plannerMobilePane === 'candidates' ? 'flex' : 'hidden lg:flex'
+            }`}
+          >
+            <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-sm font-bold text-[var(--text-primary)] truncate">
                   候选词多目标评分明细与帕累托前沿检视 ({plannerCandidates.length} 词)
                 </h2>
-                <p className="text-[11px] text-[var(--text-muted)]">
-                  点击任意词条可打开右侧研究抽屉；支持单行锁定保留或排除重算
+                <p className="text-[11px] text-[var(--text-muted)] truncate">
+                  点击任意词条可打开右侧研究抽屉；按住锁定框上下滑动或 Shift+点击可连续锁定到当前批次
                 </p>
               </div>
               <button
@@ -556,36 +780,117 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                     `study-plan-${strategy}`
                   )
                 }
-                className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 cursor-pointer"
+                className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>导出 Anki TSV</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-[38px_minmax(125px,1.25fr)_100px_136px_minmax(150px,1.5fr)_68px] items-center px-4 py-2 bg-[var(--bg-subtle)]/60 border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
-              <div>序号</div>
-              <div>候选词头与考纲</div>
-              <div>COCA · BNC</div>
-              <div>四维得分拆解 (0–100)</div>
-              <div>可解释推荐依据</div>
-              <div className="text-right">总分/干预</div>
+            {/* Quick Continuous Lock Toolbar */}
+            <div className="px-4 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-2 text-[11px] shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-semibold text-[var(--text-secondary)] inline-flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-[var(--accent-primary)]" />
+                  <span>快速批量锁定:</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => applyLockRange(0, 19, true)}
+                  className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  锁前 20
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyLockRange(0, 49, true)}
+                  className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  锁前 50
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLockedIds((prev) => {
+                      const next = new Set(prev);
+                      for (const c of plannerCandidates) {
+                        if (c.isParetoOptimal) next.add(c.word.id);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-medium cursor-pointer"
+                >
+                  锁帕累托最优
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLockedIds((prev) => {
+                      const next = new Set(prev);
+                      for (const c of plannerCandidates) {
+                        if (next.has(c.word.id)) next.delete(c.word.id);
+                        else next.add(c.word.id);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  反选本页锁定
+                </button>
+                {lockedIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setLockedIds(new Set())}
+                    className="px-2 py-0.5 rounded text-rose-600 hover:bg-rose-500/10 font-medium cursor-pointer"
+                  >
+                    清空锁定 ({lockedIds.size})
+                  </button>
+                )}
+              </div>
+              <span className="text-[10px] text-[var(--text-muted)] hidden sm:inline">
+                提示：按住左侧锁定框或锁图标上下滑动可连续锁定 · Shift+点击区间连选
+              </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0">
+            <div className="grid grid-cols-[52px_minmax(100px,1.1fr)_88px_minmax(96px,1.2fr)_100px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] items-center px-4 py-2 bg-[var(--bg-subtle)]/60 border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+              <div>锁定/序号</div>
+              <div>候选词头 · 考纲 · 词性</div>
+              <div>COCA · BNC</div>
+              <div className="hidden xl:block">四维得分拆解 (0–100)</div>
+              <div>可解释推荐依据</div>
+              <div className="text-right">总分 / 干预</div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-subtle)] min-h-0 select-none">
               {plannerCandidates.map((cand, idx) => {
                 const w = cand.word;
                 const isLocked = lockedIds.has(w.id);
+                const posMeta = w.cocaPrimaryPos ? COCA_POS_META[w.cocaPrimaryPos] : undefined;
                 return (
                   <div
                     key={w.id}
                     onClick={() => onSelectWord(w)}
-                    className={`grid grid-cols-[38px_minmax(125px,1.25fr)_100px_136px_minmax(150px,1.5fr)_68px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors ${
+                    onMouseEnter={() => handleLockRowMouseEnter(idx, w.id)}
+                    className={`grid grid-cols-[52px_minmax(100px,1.1fr)_88px_minmax(96px,1.2fr)_100px] xl:grid-cols-[56px_minmax(115px,1.15fr)_92px_136px_minmax(120px,1.3fr)_100px] items-center px-4 py-2 text-xs hover:bg-[var(--bg-hover)] cursor-pointer transition-colors ${
                       isLocked ? 'bg-[var(--accent-soft)]/50' : ''
                     }`}
                   >
-                    <div className="font-mono-tabular text-[11px] text-[var(--text-muted)]">
-                      {idx + 1}.
+                    <div
+                      className="flex items-center gap-1.5 font-mono-tabular text-[11px] text-[var(--text-muted)]"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => handleLockMouseDown(idx, w.id, e)}
+                      title="点击或按住上下拖动连续锁定保留到当前批次 (支持 Shift 区间锁定)"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isLocked}
+                        onChange={() => {}}
+                        aria-label={`锁定 ${w.word} 到当前批次`}
+                        className="rounded border-[var(--border-strong)] cursor-pointer accent-blue-600 pointer-events-none"
+                      />
+                      <span>{idx + 1}.</span>
                     </div>
 
                     <div className="min-w-0 pr-2 space-y-0.5">
@@ -605,24 +910,28 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 text-[10px] font-mono-tabular text-[var(--text-muted)]">
+                      <div className="flex flex-wrap items-center gap-1 text-[10px] font-mono-tabular">
                         {w.isCet4 && (
-                          <span className="text-teal-700 dark:text-teal-400 font-semibold">
+                          <span className="px-1 py-0.2 rounded bg-teal-500/12 text-teal-700 dark:text-teal-300 font-semibold">
                             CET-4
                           </span>
                         )}
                         {w.isCet6 && (
-                          <span className="text-indigo-700 dark:text-indigo-400 font-semibold">
-                            {w.isCet6Only ? '★CET-6' : 'CET-6'}
+                          <span className="px-1 py-0.2 rounded bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 font-semibold">
+                            CET-6
                           </span>
                         )}
-                        {w.cocaPrimaryPos && (
-                          <span>{COCA_POS_META[w.cocaPrimaryPos]?.shortLabel}</span>
+                        {posMeta && (
+                          <span
+                            className={`px-1 py-0.2 rounded text-[9px] font-semibold ${posMeta.badgeClass}`}
+                          >
+                            {posMeta.shortLabel.split(' ')[0]}
+                          </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="font-mono-tabular text-[11px] pr-2">
+                    <div className="font-mono-tabular text-[11px] pr-2 truncate">
                       {w.cocaBestPosRank ? (
                         <div className="text-blue-600 dark:text-blue-400 font-semibold">
                           COCA #{w.cocaBestPosRank}
@@ -635,9 +944,9 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       </div>
                     </div>
 
-                    {/* 4-Dimension Mini Bars */}
+                    {/* 4-Dimension Mini Bars (xl+) */}
                     <div
-                      className="pr-3 space-y-1 font-mono-tabular text-[9px]"
+                      className="hidden xl:block pr-3 space-y-1 font-mono-tabular text-[9px]"
                       title={`COCA价值: ${cand.dimensions.cocaValue} | BNC词族: ${cand.dimensions.bncFamilyValue} | CET考纲: ${cand.dimensions.examRelevance} | 知识缺口: ${cand.dimensions.knowledgeGapValue}`}
                     >
                       <div className="grid grid-cols-4 gap-1">
@@ -669,15 +978,12 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       </span>
                       <button
                         type="button"
-                        onClick={() =>
-                          setLockedIds((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(w.id)) next.delete(w.id);
-                            else next.add(w.id);
-                            return next;
-                          })
+                        onMouseDown={(e) => handleLockMouseDown(idx, w.id, e)}
+                        title={
+                          isLocked
+                            ? '取消锁定（支持按住上下滑动连续锁定/解锁）'
+                            : '锁定保留在当前批次（支持按住上下滑动连续锁定）'
                         }
-                        title={isLocked ? '取消锁定' : '锁定保留在当前批次'}
                         className={`p-1 rounded cursor-pointer ${
                           isLocked
                             ? 'text-[var(--accent-primary)] bg-[var(--accent-soft)]'
@@ -718,7 +1024,34 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
       {/* ==================================================================== */}
       {studySubTab === 'collections' && (
         <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
-          <aside className="w-full md:w-[270px] lg:w-[300px] border-b md:border-b-0 md:border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-col shrink-0 min-h-0">
+          {/* Compact Mobile Collection Selector (<768px) to avoid vertical stacking */}
+          <div className="md:hidden px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 shrink-0">
+            <select
+              value={activeCollection?.id || ''}
+              onChange={(e) => {
+                setSelectedCollectionId(e.target.value);
+                setCurrentPage(1);
+              }}
+              aria-label="选择词集"
+              className="flex-1 min-w-0 px-2.5 py-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-primary)] truncate"
+            >
+              {collections.map((col) => (
+                <option key={col.id} value={col.id}>
+                  {col.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowNewModal(true)}
+              className="px-2.5 py-1.5 rounded bg-[var(--accent-primary)] text-white text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>新建</span>
+            </button>
+          </div>
+
+          <aside className="hidden md:flex md:w-[260px] lg:w-[290px] border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex-col shrink-0 min-h-0">
             <div className="px-3.5 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                 词集与批次目录 ({collections.length})
@@ -872,12 +1205,12 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[minmax(120px,1.3fr)_105px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
+                <div className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 h-8 bg-[var(--bg-canvas)] border-b border-[var(--border-subtle)] text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] shrink-0">
                   <div>词条</div>
                   <div>COCA 排名 · 词性</div>
-                  <div>大纲</div>
+                  <div className="hidden sm:block">大纲</div>
                   <div>BNC 词族</div>
-                  <div className="text-right pr-2">BNC 频次</div>
+                  <div className="hidden sm:block text-right pr-2">BNC 频次</div>
                   <div className="text-right">状态</div>
                 </div>
 
@@ -895,7 +1228,7 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                       <div
                         key={entry.id}
                         onClick={() => onSelectWord(entry)}
-                        className="grid grid-cols-[minmax(120px,1.3fr)_105px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 py-2 hover:bg-[var(--bg-hover)] cursor-pointer text-xs"
+                        className="grid grid-cols-[minmax(110px,1.3fr)_100px_minmax(90px,1fr)_74px] sm:grid-cols-[minmax(120px,1.3fr)_110px_64px_minmax(100px,1fr)_82px_76px] items-center px-4 py-2 hover:bg-[var(--bg-hover)] cursor-pointer text-xs"
                       >
                         <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
                           <span
@@ -906,34 +1239,50 @@ export const CollectionsAndPlannerView: React.FC<CollectionsAndPlannerViewProps>
                           </span>
                         </div>
 
-                        <div className="font-mono-tabular text-[11px] pr-2">
+                        <div className="font-mono-tabular text-[11px] pr-2 flex items-center gap-1 truncate">
                           {entry.inCoca ? (
-                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                              #{entry.cocaBestPosRank}{' '}
-                              <span className="text-[10px] text-[var(--text-muted)]">
-                                ({entry.cocaPrimaryPos})
+                            <>
+                              <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                                #{entry.cocaBestPosRank}
                               </span>
-                            </span>
+                              {entry.cocaPrimaryPos && (
+                                <span
+                                  className={`px-1 py-0.2 rounded text-[9px] font-semibold ${
+                                    COCA_POS_META[entry.cocaPrimaryPos]?.badgeClass ||
+                                    'bg-[var(--bg-subtle)] text-[var(--text-secondary)]'
+                                  }`}
+                                >
+                                  {COCA_POS_META[entry.cocaPrimaryPos]?.shortLabel.split(' ')[0] ||
+                                    entry.cocaPrimaryPos}
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <span className="text-[var(--text-muted)]">—</span>
                           )}
                         </div>
 
-                        <div className="font-mono-tabular text-[11px]">
-                          {entry.isCet4 && entry.isCet6
-                            ? 'CET-4/6'
-                            : entry.isCet4
-                              ? 'CET-4'
-                              : entry.isCet6
-                                ? 'CET-6'
-                                : '—'}
+                        <div className="hidden sm:flex items-center gap-1 font-mono-tabular text-[10px]">
+                          {entry.isCet4 && (
+                            <span className="px-1 py-0.2 rounded bg-teal-500/12 text-teal-700 dark:text-teal-300 font-semibold">
+                              CET-4
+                            </span>
+                          )}
+                          {entry.isCet6 && (
+                            <span className="px-1 py-0.2 rounded bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 font-semibold">
+                              CET-6
+                            </span>
+                          )}
+                          {!entry.isCet4 && !entry.isCet6 && (
+                            <span className="text-[var(--text-muted)]">—</span>
+                          )}
                         </div>
 
                         <div className="font-mono-tabular text-[11px] text-[var(--text-secondary)] truncate pr-2">
                           {entry.band ? `${entry.band} · ${entry.headword}` : '—'}
                         </div>
 
-                        <div className="text-right pr-2 font-mono-tabular text-[11px] text-[var(--text-secondary)]">
+                        <div className="hidden sm:block text-right pr-2 font-mono-tabular text-[11px] text-[var(--text-secondary)]">
                           {freqText}
                         </div>
 

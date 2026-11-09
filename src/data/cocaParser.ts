@@ -636,13 +636,16 @@ export function buildWordLexicalRelations(
       sourceLabel: word.word,
       sourceEntityType: 'form',
       targetId: ref.entryId,
-      targetLabel: `${ref.representativeHeadword} (${ref.level} #${ref.lineNumber})`,
+      targetLabel: `${ref.representativeHeadword} (${ref.level === 'CET6' ? 'CET-6 六级词组' : 'CET-4 四级词组'})`,
       targetEntityType: 'official_entry',
       relationType: 'included_in_official_entry',
       datasetSource: 'CET2016',
       isExplicit: true,
       confidence: 'high',
-      explanation: `收录于 CET2016 官方大纲第 ${ref.lineNumber} 行词目「${ref.rawLine.replace(/\t/g, ' · ')}」`,
+      explanation:
+        ref.peerForms.length > 1
+          ? `收录于 ${ref.level === 'CET6' ? 'CET-6 六级' : 'CET-4 四级'}考纲核心词组，同组派生与关联词：${ref.peerForms.join(' · ')}`
+          : `收录于 ${ref.level === 'CET6' ? 'CET-6 六级' : 'CET-4 四级'}考纲独立核心词条「${ref.representativeHeadword}」`,
     });
 
     for (const peer of ref.peerForms) {

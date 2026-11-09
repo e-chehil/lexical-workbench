@@ -173,7 +173,7 @@ export const COCA_POS_META: Record<
     abbr: 'det.',
     category: 'function',
     badgeClass:
-      'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+      'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/70',
   },
   article: {
     zh: '冠词/物主限定词 (article)',
@@ -183,7 +183,7 @@ export const COCA_POS_META: Record<
     abbr: 'art.',
     category: 'function',
     badgeClass:
-      'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+      'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/70',
   },
   negation: {
     zh: '否定词 (negation)',
@@ -203,7 +203,7 @@ export const COCA_POS_META: Record<
     abbr: '+inf.',
     category: 'function',
     badgeClass:
-      'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800/70',
+      'bg-lime-50 text-lime-700 border-lime-200 dark:bg-lime-950/60 dark:text-lime-300 dark:border-lime-800/70',
   },
   existential: {
     zh: '存在句标记 (existential)',

@@ -1563,7 +1563,7 @@ export const CORPUS_COMPARISON_PRESETS: {
   { id: 'bnc_10k_20k', label: 'BNC 10k–20k 词族代表词头', unitDescription: 'Nation BNC/COCA 10k–20k 频段词族代表词头' },
   { id: 'cet4_all', label: 'CET-4 四级大纲词条', unitDescription: 'CET2016 四级大纲收录的全部去重词形' },
   { id: 'cet6_all', label: 'CET-6 六级大纲词条', unitDescription: 'CET2016 六级大纲收录的全部去重词形' },
-  { id: 'cet6_new', label: 'CET-6 六级新增词条 (★)', unitDescription: '仅属于 CET-6 新增（不含四级）的去重词形' },
+  { id: 'cet6_new', label: 'CET-6 六级新增词条', unitDescription: '仅属于 CET-6 新增（不含四级）的去重词形' },
 ];
 
 export function resolvePresetWordSet(
