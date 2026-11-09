@@ -9,10 +9,8 @@ import {
   Square,
   X,
   RotateCcw,
-  Layers,
-  Tag,
   Columns,
-  Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 import {
   BncCocaFamily,
@@ -33,6 +31,8 @@ import {
 import {
   DEFAULT_FILTER_CRITERIA,
   filterAndSortCocaLexemes,
+  pruneSelectionToVisibleIds,
+  resolveCetEntryHomographLexeme,
 } from '../data/searchAndFilter.ts';
 import { formatCompactFrequency } from '../utils/frequency.ts';
 
@@ -56,18 +56,26 @@ interface ExploreViewProps {
   selectedWordId: string | null;
   onSelectWord: (word: LexiconWordItem, openDrawer?: boolean) => void;
   onInspectFamily: (familyId: string, highlightWord?: string) => void;
-  onQuickStatusChange: (wordId: string, wordDisplay: string, status: LearningStatus) => void;
+  onQuickStatusChange: (
+    wordId: string,
+    wordDisplay: string,
+    status: LearningStatus
+  ) => Promise<void> | void;
   onPosStatusChange?: (
     wordId: string,
     wordDisplay: string,
     pos: CocaRawPos,
     status: LearningStatus
-  ) => void;
-  onBatchSetStatus: (wordIds: string[], status: LearningStatus, label?: string) => void;
-  onBatchAddTag: (wordIds: string[], tag: string) => void;
-  onAddWordsToStaticCollection: (collectionId: string, wordIds: string[]) => void;
+  ) => Promise<void> | void;
+  onBatchSetStatus: (
+    wordIds: string[],
+    status: LearningStatus,
+    label?: string
+  ) => Promise<void> | void;
+  onBatchAddTag: (wordIds: string[], tag: string) => Promise<void> | void;
+  onAddWordsToStaticCollection: (collectionId: string, wordIds: string[]) => Promise<void> | void;
   onCreateStaticCollectionFromSelection?: (name: string, wordIds: string[]) => Promise<void>;
-  onSaveDynamicCollection: (name: string, description: string) => void;
+  onSaveDynamicCollection: (name: string, description: string) => Promise<void> | void;
   onExportCurrentFiltered: (format: 'csv' | 'txt', customList?: LexiconWordItem[]) => void;
   compactDensity?: boolean;
   initialScrollOffset?: number;
@@ -76,41 +84,13 @@ interface ExploreViewProps {
 
 const ALL_STATUSES: LearningStatus[] = ['unrated', 'queued', 'learning', 'mastered', 'deferred'];
 
-const MAJOR_COCA_POS: CocaRawPos[] = [
-  'noun',
-  'adjective',
-  'verb',
-  'adverb',
-  'preposition',
-  'conjunction',
-  'pronoun',
-  'determiner',
-  'number',
-  'interjection',
-  'article',
-];
-
-const SOURCE_FILTER_LABELS: { value: SourceFilterOption; label: string; group: string }[] = [
-  { value: 'all', label: '全部词库 (94,954 词形)', group: '基础' },
-  { value: 'all_three_sources', label: '三源交集 CET ∩ BNC ∩ COCA (7,716)', group: '跨源交集' },
-  { value: 'both_bnc_coca', label: 'BNC ∩ COCA 双语料交集 (35,144)', group: '跨源交集' },
-  { value: 'both_cet_coca', label: 'CET ∩ COCA 考纲当代交集 (7,900)', group: '跨源交集' },
-  { value: 'both_cet_bnc', label: 'CET ∩ BNC 考纲词族交集 (7,808)', group: '跨源交集' },
-  { value: 'coca_all', label: 'COCA 2020 全部收录 (含变体)', group: '单源与差集' },
-  { value: 'coca_only', label: '仅 COCA 2020 独有 (18,623)', group: '单源与差集' },
-  { value: 'bnc_only', label: '仅 BNC/COCA 25k 独有 (40,889)', group: '单源与差集' },
-  { value: 'cet_not_in_coca', label: 'CET 考纲未进 COCA 60k (含英式/派生)', group: '单源与差集' },
-  { value: 'cet_only', label: 'CET 考纲未进 BNC 25k', group: '单源与差集' },
-  { value: 'cet_all', label: 'CET-4 / CET-6 全部考纲词 (8,014)', group: '四六级考纲' },
-  { value: 'cet4', label: 'CET-4 四级大纲词', group: '四六级考纲' },
-  { value: 'cet6', label: 'CET-6 六级全部词', group: '四六级考纲' },
-  { value: 'cet6_new', label: 'CET-6 六级新增词', group: '四六级考纲' },
-  { value: 'bnc_all', label: 'BNC/COCA 1k–25k 全部词形 (76,125)', group: 'BNC 词族' },
-];
+// Include all 14 official COCA parts of speech
+const ALL_COCA_POS: CocaRawPos[] = Object.keys(COCA_POS_META) as CocaRawPos[];
 
 export const ExploreView: React.FC<ExploreViewProps> = ({
   filteredWords,
   totalLexiconCount,
+  allWords,
   wordsMap,
   cocaLexemes,
   families,
@@ -151,6 +131,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [batchTagInput, setBatchTagInput] = useState('');
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newCollectionDesc, setNewCollectionDesc] = useState('');
@@ -176,15 +157,49 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   const isCompactCardLayout = containerWidth < 560;
   const isMediumTableLayout = containerWidth >= 560 && containerWidth < 840;
 
-  // Derived entity lists depending on entityMode
-  const headwordEntities = useMemo(() => {
-    return filteredWords.filter((w) => w.inCoca || w.isHeadword || w.inCet);
-  }, [filteredWords]);
+  // Dynamic source filter labels computed from loaded allWords (never hardcoded stale numbers)
+  const sourceFilterOptions = useMemo(() => {
+    let allThree = 0;
+    let bncCoca = 0;
+    let cetCoca = 0;
+    let cetBnc = 0;
+    let cocaOnly = 0;
+    let bncOnly = 0;
+    let cetAll = 0;
+    let bncAll = 0;
 
-  const activeWordList = useMemo(
-    () => (entityMode === 'headwords' ? headwordEntities : filteredWords),
-    [entityMode, headwordEntities, filteredWords]
-  );
+    for (let i = 0; i < allWords.length; i++) {
+      const w = allWords[i];
+      const inBncAny = w.inBnc || Boolean(w.bncLinkedViaVariant);
+      if (w.inCet) cetAll++;
+      if (inBncAny) bncAll++;
+      if (w.inCet && w.inBnc && w.inCoca) allThree++;
+      if (w.inBnc && w.inCoca) bncCoca++;
+      if (w.inCet && w.inCoca) cetCoca++;
+      if (w.inCet && inBncAny) cetBnc++;
+      if (w.inCoca && !w.inBnc && !w.inCet) cocaOnly++;
+      if (w.inBnc && !w.inCoca && !w.inCet) bncOnly++;
+    }
+
+    const list: { value: SourceFilterOption; label: string }[] = [
+      { value: 'all', label: `全部词库 (${totalLexiconCount.toLocaleString()} 词形)` },
+      { value: 'all_three_sources', label: `三源交集 CET ∩ BNC ∩ COCA (${allThree.toLocaleString()})` },
+      { value: 'both_bnc_coca', label: `BNC ∩ COCA 双语料交集 (${bncCoca.toLocaleString()})` },
+      { value: 'both_cet_coca', label: `CET ∩ COCA 考纲当代交集 (${cetCoca.toLocaleString()})` },
+      { value: 'both_cet_bnc', label: `CET ∩ BNC 考纲词族交集 (${cetBnc.toLocaleString()})` },
+      { value: 'coca_all', label: 'COCA 2020 全部收录 (含变体)' },
+      { value: 'coca_only', label: `仅 COCA 2020 独有 (${cocaOnly.toLocaleString()})` },
+      { value: 'bnc_only', label: `仅 BNC/COCA 25k 独有 (${bncOnly.toLocaleString()})` },
+      { value: 'cet_not_in_coca', label: 'CET 考纲未进 COCA 60k (含英式/派生)' },
+      { value: 'cet_only', label: 'CET 考纲未进 BNC 25k' },
+      { value: 'cet_all', label: `CET-4 / CET-6 全部考纲词 (${cetAll.toLocaleString()})` },
+      { value: 'cet4', label: 'CET-4 四级大纲词' },
+      { value: 'cet6', label: 'CET-6 六级全部词' },
+      { value: 'cet6_new', label: 'CET-6 六级新增词' },
+      { value: 'bnc_all', label: `BNC/COCA 1k–25k 全部词形 (${bncAll.toLocaleString()})` },
+    ];
+    return list;
+  }, [allWords, totalLexiconCount]);
 
   // Continuous drag-to-select & Shift+Click range selection refs
   const isDraggingSelectRef = useRef(false);
@@ -192,6 +207,12 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   const dragTargetStateRef = useRef<boolean>(true);
   const baselineSelectionRef = useRef<Set<string>>(new Set());
   const lastClickedIndexRef = useRef<number | null>(null);
+
+  // Prune selectedRowIds whenever filteredWords changes so hidden rows are never modified by batch actions
+  useEffect(() => {
+    setSelectedRowIds((prev) => pruneSelectionToVisibleIds(prev, filteredWords));
+    lastClickedIndexRef.current = null;
+  }, [filteredWords]);
 
   useEffect(() => {
     const handleGlobalMouseUp = () => {
@@ -202,7 +223,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       }
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('touchend', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('touchend', handleGlobalMouseUp);
+    };
   }, []);
 
   const applyRangeSelection = (
@@ -212,15 +237,36 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     baseSet: Set<string>
   ) => {
     const lo = Math.max(0, Math.min(startIdx, endIdx));
-    const hi = Math.min(activeWordList.length - 1, Math.max(startIdx, endIdx));
+    const hi = Math.min(filteredWords.length - 1, Math.max(startIdx, endIdx));
     const next = new Set(baseSet);
     for (let i = lo; i <= hi; i++) {
-      const item = activeWordList[i];
+      const item = filteredWords[i];
       if (!item) continue;
       if (targetChecked) next.add(item.id);
       else next.delete(item.id);
     }
     setSelectedRowIds(next);
+  };
+
+  const toggleSingleRowSelection = (
+    rowIndex: number,
+    wordId: string,
+    currentlyChecked: boolean,
+    shiftKey = false
+  ) => {
+    if (shiftKey && lastClickedIndexRef.current !== null) {
+      applyRangeSelection(lastClickedIndexRef.current, rowIndex, !currentlyChecked, selectedRowIds);
+      lastClickedIndexRef.current = rowIndex;
+      return;
+    }
+    const nextTargetState = !currentlyChecked;
+    lastClickedIndexRef.current = rowIndex;
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (nextTargetState) next.add(wordId);
+      else next.delete(wordId);
+      return next;
+    });
   };
 
   const handleCheckboxMouseDown = (
@@ -230,7 +276,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     currentlyChecked: boolean
   ) => {
     e.stopPropagation();
-    e.preventDefault();
+    if (e.button !== 0) return;
 
     if (e.shiftKey && lastClickedIndexRef.current !== null) {
       const targetState = !currentlyChecked;
@@ -276,7 +322,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     const bandSet = criteria.bands.length > 0 ? new Set(criteria.bands) : null;
     const result = families.filter((fam) => {
       if (bandSet && !bandSet.has(fam.bandNumber)) return false;
-      if (criteria.sourceFilter === 'cet_all' || criteria.sourceFilter === 'cet4' || criteria.sourceFilter === 'cet6') {
+      if (
+        criteria.sourceFilter === 'cet_all' ||
+        criteria.sourceFilter === 'cet4' ||
+        criteria.sourceFilter === 'cet6'
+      ) {
         if (fam.cetMemberCount === 0) return false;
       }
       if (criteria.sourceFilter === 'both_bnc_coca' || criteria.sourceFilter === 'coca_all') {
@@ -305,12 +355,25 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     return result;
   }, [entityMode, families, criteria, sortBy]);
 
-  const cetEntryEntities = useMemo(() => {
+  // Pre-compute occurrence index per core headword across cetEntries so homographs get distinct PoS
+  const cetEntryEntitiesWithHomographIdx = useMemo(() => {
     if (entityMode !== 'official_entries') return [];
     const q = criteria.searchQuery.trim().toLowerCase();
-    return cetEntries.filter((entry) => {
+    const seenCounts = new Map<string, number>();
+
+    const allWithIdx = cetEntries.map((entry) => {
+      const firstForm = (entry.members[0]?.expandedForms[0] || '').toLowerCase();
+      const prevCount = seenCounts.get(firstForm) || 0;
+      seenCounts.set(firstForm, prevCount + 1);
+      return { entry, occurrenceIdx: prevCount };
+    });
+
+    return allWithIdx.filter(({ entry }) => {
       if (criteria.sourceFilter === 'cet4' && entry.level !== 'CET4') return false;
       if (criteria.sourceFilter === 'cet6_new' && !entry.isCet6) return false;
+      if (criteria.homographsOnly && !entry.members.some((m) => m.homographNumber !== null)) {
+        return false;
+      }
       if (q) {
         return (
           entry.rawLine.toLowerCase().includes(q) ||
@@ -323,27 +386,32 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 
   const activeListCount = useMemo(() => {
     switch (entityMode) {
-      case 'headwords':
-        return headwordEntities.length;
       case 'lexemes':
         return lexemeEntities.length;
       case 'families':
         return familyEntities.length;
       case 'official_entries':
-        return cetEntryEntities.length;
+        return cetEntryEntitiesWithHomographIdx.length;
+      case 'forms':
       default:
         return filteredWords.length;
     }
   }, [
     entityMode,
-    headwordEntities.length,
     lexemeEntities.length,
     familyEntities.length,
-    cetEntryEntities.length,
+    cetEntryEntitiesWithHomographIdx.length,
     filteredWords.length,
   ]);
 
-  const rowHeight = isCompactCardLayout ? 60 : compactDensity ? 38 : 44;
+  const rowHeight =
+    isCompactCardLayout
+      ? 60
+      : entityMode === 'official_entries'
+        ? 52
+        : compactDensity
+          ? 38
+          : 44;
 
   const rowVirtualizer = useVirtualizer({
     count: activeListCount,
@@ -356,6 +424,28 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   useEffect(() => {
     rowVirtualizer.measure();
   }, [rowHeight, entityMode, rowVirtualizer]);
+
+  // Dynamic CSS Grid Template for `forms` view so hidden columns are genuinely removed from the grid
+  const formsGridTemplate = useMemo(() => {
+    const tracks: string[] = ['32px', 'minmax(130px, 1.35fr)'];
+    if (visibleCols.cocaRank) {
+      tracks.push('124px');
+    }
+    if (!isMediumTableLayout && visibleCols.cocaPos) {
+      tracks.push('minmax(125px, 1.15fr)');
+    }
+    if (visibleCols.cetLevel) {
+      tracks.push('64px');
+    }
+    if (visibleCols.bncFamily) {
+      tracks.push('minmax(96px, 1fr)');
+    }
+    if (!isMediumTableLayout && visibleCols.bncFormFreq) {
+      tracks.push('76px');
+    }
+    tracks.push('74px'); // Status column
+    return tracks.join(' ');
+  }, [visibleCols, isMediumTableLayout]);
 
   const toggleCocaPos = (pos: CocaRawPos) => {
     onChangeCriteria((prev) => {
@@ -388,9 +478,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     const targetWords =
       selectedRowIds.size > 0
         ? filteredWords.filter((w) => selectedRowIds.has(w.id))
-        : entityMode === 'headwords'
-          ? headwordEntities
-          : filteredWords;
+        : filteredWords;
 
     const lines = [
       '#separator:tab',
@@ -452,20 +540,19 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       ref={rootRef}
       className="flex flex-col h-full min-h-0 bg-[var(--bg-surface)] overflow-hidden relative"
     >
-      {/* Row 1: Entity View Switcher & Dataset Counter */}
+      {/* Row 1: 4-Entity View Switcher & Dataset Counter */}
       <div className="px-3.5 sm:px-4 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
+        <div
+          role="tablist"
+          aria-label="切换词汇实体层级视图"
+          className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0"
+        >
           {(
             [
               {
                 id: 'forms',
                 label: '词形',
                 badge: filteredWords.length.toLocaleString(),
-              },
-              {
-                id: 'headwords',
-                label: '词头',
-                badge: headwordEntities.length.toLocaleString(),
               },
               {
                 id: 'lexemes',
@@ -488,7 +575,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 label: '考纲',
                 badge:
                   entityMode === 'official_entries'
-                    ? cetEntryEntities.length.toLocaleString()
+                    ? cetEntryEntitiesWithHomographIdx.length.toLocaleString()
                     : cetEntries.length.toLocaleString(),
               },
             ] as const
@@ -503,7 +590,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   setSelectedRowIds(new Set());
                   lastClickedIndexRef.current = null;
                 }}
-                className={`px-2 sm:px-2.5 py-1 rounded text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 rounded text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                   active
                     ? 'bg-[var(--bg-surface)] text-[var(--accent-primary)] border border-[var(--border-subtle)] font-semibold shadow-2xs'
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -518,7 +605,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           })}
         </div>
 
-        {/* Right Actions: Quick Multi-Select Presets + Export & Save Collection */}
+        {/* Right Actions: Save Collection, Export & Dynamic Column Visibility */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
@@ -549,56 +636,58 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             CSV
           </button>
 
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowColumnMenu((v) => !v)}
-              className="p-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-              title="自定义显示列"
-              aria-label="自定义显示列"
-            >
-              <Columns className="w-3.5 h-3.5" />
-            </button>
-            {showColumnMenu && (
-              <div className="absolute right-0 mt-1 w-48 p-2.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl z-30 space-y-1.5 text-xs">
-                <div className="font-semibold text-[var(--text-muted)] text-[10px] uppercase tracking-wider pb-1 border-b border-[var(--border-subtle)]">
-                  表格显示列配置
+          {entityMode === 'forms' && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowColumnMenu((v) => !v)}
+                className="p-1.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+                title="自定义显示列"
+                aria-label="自定义显示列"
+              >
+                <Columns className="w-3.5 h-3.5" />
+              </button>
+              {showColumnMenu && (
+                <div className="absolute right-0 mt-1 w-48 p-2.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl z-30 space-y-1.5 text-xs">
+                  <div className="font-semibold text-[var(--text-muted)] text-[10px] uppercase tracking-wider pb-1 border-b border-[var(--border-subtle)]">
+                    表格显示列配置
+                  </div>
+                  {[
+                    { key: 'cocaRank', label: 'COCA 排名与频次' },
+                    { key: 'cocaPos', label: 'COCA 词性分布' },
+                    { key: 'cetLevel', label: 'CET 四六级考纲' },
+                    { key: 'bncFamily', label: 'BNC 词族与频段' },
+                    { key: 'bncFormFreq', label: 'BNC 词形实测频次' },
+                  ].map((col) => (
+                    <label
+                      key={col.key}
+                      className="flex items-center gap-2 py-0.5 cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={visibleCols[col.key as keyof typeof visibleCols]}
+                        onChange={() =>
+                          setVisibleCols((prev) => ({
+                            ...prev,
+                            [col.key]: !prev[col.key as keyof typeof visibleCols],
+                          }))
+                        }
+                        className="rounded border-[var(--border-strong)]"
+                      />
+                      <span>{col.label}</span>
+                    </label>
+                  ))}
                 </div>
-                {[
-                  { key: 'cocaRank', label: 'COCA 排名与频次' },
-                  { key: 'cocaPos', label: 'COCA 词性分布' },
-                  { key: 'cetLevel', label: 'CET 四六级考纲' },
-                  { key: 'bncFamily', label: 'BNC 词族与频段' },
-                  { key: 'bncFormFreq', label: 'BNC 词形实测频次' },
-                ].map((col) => (
-                  <label
-                    key={col.key}
-                    className="flex items-center gap-2 py-0.5 cursor-pointer text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visibleCols[col.key as keyof typeof visibleCols]}
-                      onChange={() =>
-                        setVisibleCols((prev) => ({
-                          ...prev,
-                          [col.key]: !prev[col.key as keyof typeof visibleCols],
-                        }))
-                      }
-                      className="rounded border-[var(--border-strong)]"
-                    />
-                    <span>{col.label}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Row 2: Search, Source Intersection, COCA Quick Tiers, Sort & Advanced Toggle */}
       <div className="px-3.5 sm:px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center gap-2 shrink-0">
         {/* Search Input + Match Mode */}
-        <div className="flex items-center flex-1 min-w-[180px] max-w-md bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-md focus-within:border-[var(--accent-primary)] overflow-hidden">
+        <div className="flex items-center flex-1 min-w-[180px] max-w-md h-8 bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-md focus-within:border-[var(--accent-primary)] overflow-hidden">
           <Search className="w-3.5 h-3.5 text-[var(--text-muted)] ml-2.5 shrink-0" />
           <input
             type="search"
@@ -608,7 +697,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             }
             placeholder="搜索单词、词头、短语或变体…"
             aria-label="词库检索"
-            className="w-full px-2 py-1 text-xs bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none min-w-0"
+            className="w-full px-2 h-full text-xs bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none min-w-0"
           />
           {criteria.searchQuery && (
             <button
@@ -629,7 +718,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               }))
             }
             aria-label="搜索匹配模式"
-            className="px-2 py-1 text-[11px] bg-[var(--bg-subtle)] border-l border-[var(--border-subtle)] text-[var(--text-secondary)] focus:outline-none cursor-pointer shrink-0"
+            className="px-2 h-full text-[11px] bg-[var(--bg-subtle)] border-l border-[var(--border-subtle)] text-[var(--text-secondary)] focus:outline-none cursor-pointer shrink-0"
           >
             <option value="auto">智能</option>
             <option value="prefix">前缀</option>
@@ -649,9 +738,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             }))
           }
           aria-label="多源范围与交集筛选"
-          className="px-2 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] max-w-[190px] sm:max-w-[220px] truncate cursor-pointer shrink-0"
+          className="h-8 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] max-w-[195px] sm:max-w-[230px] truncate cursor-pointer shrink-0"
         >
-          {SOURCE_FILTER_LABELS.map((opt) => (
+          {sourceFilterOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -659,8 +748,8 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         </select>
 
         {/* COCA Quick Rank Range Selector */}
-        <div className="hidden xl:flex items-center gap-0.5 bg-[var(--bg-canvas)] p-0.5 rounded-md border border-[var(--border-subtle)] text-[11px] font-mono-tabular shrink-0">
-          <span className="px-1.5 text-[var(--text-muted)]">COCA:</span>
+        <div className="hidden xl:flex items-center h-8 gap-0.5 bg-[var(--bg-canvas)] px-1 rounded-md border border-[var(--border-subtle)] text-[11px] font-mono-tabular shrink-0">
+          <span className="px-1 text-[var(--text-muted)]">COCA:</span>
           {[
             { label: '全量', max: null },
             { label: '1k', max: 1000 },
@@ -695,7 +784,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           value={sortBy}
           onChange={(e) => onChangeSortBy(e.target.value as SortOption)}
           aria-label="排序依据"
-          className="px-2 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] focus:outline-none max-w-[165px] truncate cursor-pointer shrink-0"
+          className="h-8 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-xs font-medium text-[var(--text-secondary)] focus:outline-none max-w-[165px] truncate cursor-pointer shrink-0"
         >
           <option value="priority_weight_desc">综合价值降序</option>
           <option value="coca_rank_asc">COCA 排名升序</option>
@@ -713,7 +802,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           type="button"
           onClick={() => setShowAdvancedFilters((v) => !v)}
           aria-expanded={showAdvancedFilters}
-          className={`px-2.5 py-1.5 rounded-md border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+          className={`h-8 px-2.5 rounded-md border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
             showAdvancedFilters || hasActiveFilters
               ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)]'
               : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -730,7 +819,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               onSelectStaticCollectionId(null);
               onChangeCriteria(DEFAULT_FILTER_CRITERIA);
             }}
-            className="px-2 py-1.5 rounded-md text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+            className="h-8 px-2 rounded-md text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
             title="重置全部筛选条件"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -739,247 +828,242 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         )}
       </div>
 
-      {/* Collapsible Multi-Dimensional Filter Panel */}
+      {/* Collapsible Multi-Dimensional Filter Panel (Clean Aligned Labeled Grid) */}
       {showAdvancedFilters && (
-        <div className="px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] space-y-3 text-xs shrink-0">
-          {/* Line 1: COCA Rank Mode + Custom Rank Range + COCA PoS Pills */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                COCA 排名口径:
-              </span>
-              <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() =>
-                    onChangeCriteria((prev) => ({ ...prev, cocaRankMode: 'lemma_pos' }))
-                  }
-                  className={`px-2 py-0.5 rounded cursor-pointer ${
-                    criteria.cocaRankMode !== 'derived_headword'
-                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                      : 'text-[var(--text-secondary)]'
-                  }`}
-                >
-                  词元+词性官方排名 (1–60k)
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onChangeCriteria((prev) => ({
-                      ...prev,
-                      cocaRankMode: 'derived_headword',
-                    }))
-                  }
-                  className={`px-2 py-0.5 rounded cursor-pointer ${
-                    criteria.cocaRankMode === 'derived_headword'
-                      ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
-                      : 'text-[var(--text-secondary)]'
-                  }`}
-                >
-                  词头合计派生排名 (1–53.9k)
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1 font-mono-tabular">
-                <input
-                  type="number"
-                  min={1}
-                  max={60000}
-                  value={criteria.minCocaRank ?? ''}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({
-                      ...prev,
-                      minCocaRank: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                  placeholder="最低排名 1"
-                  className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
-                />
-                <span className="text-[var(--text-muted)]">–</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={60000}
-                  value={criteria.maxCocaRank ?? ''}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({
-                      ...prev,
-                      maxCocaRank: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                  placeholder="最高 60000"
-                  className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Multi-PoS & Headword Toggles */}
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={Boolean(criteria.cocaMultiPosOnly)}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({ ...prev, cocaMultiPosOnly: e.target.checked }))
-                  }
-                  className="rounded border-[var(--border-strong)]"
-                />
-                <span>仅多词性词头 (≥2 PoS)</span>
-              </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={criteria.familyFilter === 'headword_only'}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({
-                      ...prev,
-                      familyFilter: e.target.checked ? 'headword_only' : 'all',
-                    }))
-                  }
-                  className="rounded border-[var(--border-strong)]"
-                />
-                <span>仅 BNC 词族首词</span>
-              </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={criteria.homographsOnly}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({ ...prev, homographsOnly: e.target.checked }))
-                  }
-                  className="rounded border-[var(--border-strong)]"
-                />
-                <span>CET 同形异义词</span>
-              </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
-                <input
-                  type="checkbox"
-                  checked={criteria.phrasesOnly}
-                  onChange={(e) =>
-                    onChangeCriteria((prev) => ({ ...prev, phrasesOnly: e.target.checked }))
-                  }
-                  className="rounded border-[var(--border-strong)]"
-                />
-                <span>多词表达</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Line 2: COCA Part-of-Speech Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
-              COCA 词性:
+        <div className="px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] space-y-2.5 text-xs shrink-0">
+          {/* Row 1: COCA Rank Mode & Range + Structural Toggles */}
+          <div className="grid grid-cols-1 md:grid-cols-[96px_1fr] gap-2 items-center">
+            <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+              COCA 排名口径
             </span>
-            {MAJOR_COCA_POS.map((pos) => {
-              const meta = COCA_POS_META[pos];
-              const active = (criteria.cocaPosFilter || []).includes(pos);
-              return (
-                <button
-                  key={pos}
-                  type="button"
-                  onClick={() => toggleCocaPos(pos)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)] text-white font-semibold'
-                      : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                  }`}
-                >
-                  {meta.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Line 3: BNC Band Presets & Learning Status Filters */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
-                BNC 频段:
-              </span>
-              {[
-                { label: '全部', bands: [] as number[] },
-                { label: '1k–3k', bands: [1, 2, 3] },
-                { label: '4k–6k', bands: [4, 5, 6] },
-                { label: '7k–10k', bands: [7, 8, 9, 10] },
-                {
-                  label: '11k–25k',
-                  bands: Array.from({ length: 15 }, (_, i) => i + 11),
-                },
-              ].map((preset) => {
-                const isSelected =
-                  preset.bands.length === criteria.bands.length &&
-                  preset.bands.every((b) => criteria.bands.includes(b));
-                return (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-[11px]">
                   <button
-                    key={preset.label}
                     type="button"
                     onClick={() =>
-                      onChangeCriteria((prev) => ({ ...prev, bands: preset.bands }))
+                      onChangeCriteria((prev) => ({ ...prev, cocaRankMode: 'lemma_pos' }))
                     }
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border cursor-pointer ${
-                      isSelected
-                        ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)] text-[var(--accent-primary)] font-semibold'
-                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                    className={`px-2 py-0.5 rounded cursor-pointer ${
+                      criteria.cocaRankMode !== 'derived_headword'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                        : 'text-[var(--text-secondary)]'
                     }`}
                   >
-                    {preset.label}
+                    词元+词性官方排名 (1–60k)
                   </button>
-                );
-              })}
-            </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeCriteria((prev) => ({
+                        ...prev,
+                        cocaRankMode: 'derived_headword',
+                      }))
+                    }
+                    className={`px-2 py-0.5 rounded cursor-pointer ${
+                      criteria.cocaRankMode === 'derived_headword'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
+                        : 'text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    词头合计派生排名 (1–53.9k)
+                  </button>
+                </div>
 
+                <div className="flex items-center gap-1 font-mono-tabular">
+                  <input
+                    type="number"
+                    min={1}
+                    max={60000}
+                    value={criteria.minCocaRank ?? ''}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({
+                        ...prev,
+                        minCocaRank: e.target.value ? Number(e.target.value) : null,
+                      }))
+                    }
+                    placeholder="最低排名 1"
+                    className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
+                  />
+                  <span className="text-[var(--text-muted)]">–</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60000}
+                    value={criteria.maxCocaRank ?? ''}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({
+                        ...prev,
+                        maxCocaRank: e.target.value ? Number(e.target.value) : null,
+                      }))
+                    }
+                    placeholder="最高 60000"
+                    className="w-24 px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(criteria.cocaMultiPosOnly)}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({ ...prev, cocaMultiPosOnly: e.target.checked }))
+                    }
+                    className="rounded border-[var(--border-strong)]"
+                  />
+                  <span>仅多词性词头 (≥2 PoS)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={criteria.familyFilter === 'headword_only'}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({
+                        ...prev,
+                        familyFilter: e.target.checked ? 'headword_only' : 'all',
+                      }))
+                    }
+                    className="rounded border-[var(--border-strong)]"
+                  />
+                  <span>仅 BNC 词族首词</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={criteria.homographsOnly}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({ ...prev, homographsOnly: e.target.checked }))
+                    }
+                    className="rounded border-[var(--border-strong)]"
+                  />
+                  <span>CET 同形异义词</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={criteria.phrasesOnly}
+                    onChange={(e) =>
+                      onChangeCriteria((prev) => ({ ...prev, phrasesOnly: e.target.checked }))
+                    }
+                    className="rounded border-[var(--border-strong)]"
+                  />
+                  <span>多词表达</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: All 14 COCA Part-of-Speech Filter Pills */}
+          <div className="grid grid-cols-1 md:grid-cols-[96px_1fr] gap-2 items-start pt-2 border-t border-[var(--border-subtle)]/70">
+            <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider pt-0.5">
+              COCA 14 词性
+            </span>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mr-1">
-                学习状态:
-              </span>
-              {ALL_STATUSES.map((st) => {
-                const meta = LEARNING_STATUS_META[st];
-                const active = criteria.statuses.includes(st);
+              {ALL_COCA_POS.map((pos) => {
+                const meta = COCA_POS_META[pos];
+                const active = (criteria.cocaPosFilter || []).includes(pos);
                 return (
                   <button
-                    key={st}
+                    key={pos}
                     type="button"
-                    onClick={() => toggleStatusFilter(st)}
-                    className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
+                    onClick={() => toggleCocaPos(pos)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border transition-colors cursor-pointer ${
                       active
-                        ? `${meta.badgeClass} font-semibold`
-                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                        ? 'bg-[var(--accent-primary)] border-[var(--accent-primary)] text-white font-semibold'
+                        : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    {meta.shortLabel}
+                    {meta.label}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Optional Static Collection or Personal Tag Filter */}
-          {(staticCollections.length > 0 || allAvailableTags.length > 0) && (
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[var(--border-subtle)]">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-[var(--text-muted)]">
-                  限定词集:
-                </span>
-                <select
-                  value={selectedStaticCollectionId || ''}
-                  onChange={(e) => onSelectStaticCollectionId(e.target.value || null)}
-                  className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-xs"
-                >
-                  <option value="">不限词集 (全库检索)</option>
-                  {staticCollections.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.wordIds.length})
-                    </option>
-                  ))}
-                </select>
+          {/* Row 3: BNC Band Presets & Learning Status Filters */}
+          <div className="grid grid-cols-1 md:grid-cols-[96px_1fr] gap-2 items-center pt-2 border-t border-[var(--border-subtle)]/70">
+            <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+              频段与学习状态
+            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { label: '全部频段', bands: [] as number[] },
+                  { label: 'BNC 1k–3k', bands: [1, 2, 3] },
+                  { label: 'BNC 4k–6k', bands: [4, 5, 6] },
+                  { label: 'BNC 7k–10k', bands: [7, 8, 9, 10] },
+                  {
+                    label: 'BNC 11k–25k',
+                    bands: Array.from({ length: 15 }, (_, i) => i + 11),
+                  },
+                ].map((preset) => {
+                  const isSelected =
+                    preset.bands.length === criteria.bands.length &&
+                    preset.bands.every((b) => criteria.bands.includes(b));
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() =>
+                        onChangeCriteria((prev) => ({ ...prev, bands: preset.bands }))
+                      }
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular border cursor-pointer ${
+                        isSelected
+                          ? 'bg-[var(--accent-soft)] border-[var(--accent-primary)] text-[var(--accent-primary)] font-semibold'
+                          : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {ALL_STATUSES.map((st) => {
+                  const meta = LEARNING_STATUS_META[st];
+                  const active = criteria.statuses.includes(st);
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => toggleStatusFilter(st)}
+                      className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
+                        active
+                          ? `${meta.badgeClass} font-semibold`
+                          : 'bg-[var(--bg-surface)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {meta.shortLabel}
+                    </button>
+                  );
+                })}
+
+                {staticCollections.length > 0 && (
+                  <select
+                    value={selectedStaticCollectionId || ''}
+                    onChange={(e) => onSelectStaticCollectionId(e.target.value || null)}
+                    aria-label="限定词集"
+                    className="ml-1 px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[11px]"
+                  >
+                    <option value="">不限词集</option>
+                    {staticCollections.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.wordIds.length})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 
       {/* Fast Multi-Selection Preset Strip (Fixed single-row height — never shifts table down) */}
-      {(entityMode === 'forms' || entityMode === 'headwords') && (
+      {entityMode === 'forms' && (
         <div className="px-3.5 sm:px-4 h-9 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/70 flex items-center justify-between gap-2 text-xs shrink-0">
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             <span className="font-mono-tabular font-semibold text-[var(--text-secondary)] whitespace-nowrap">
@@ -988,7 +1072,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             <button
               type="button"
               onClick={() =>
-                setSelectedRowIds(new Set(activeWordList.slice(0, 50).map((w) => w.id)))
+                setSelectedRowIds(new Set(filteredWords.slice(0, 50).map((w) => w.id)))
               }
               className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:border-[var(--accent-primary)] cursor-pointer whitespace-nowrap"
             >
@@ -997,7 +1081,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             <button
               type="button"
               onClick={() =>
-                setSelectedRowIds(new Set(activeWordList.slice(0, 100).map((w) => w.id)))
+                setSelectedRowIds(new Set(filteredWords.slice(0, 100).map((w) => w.id)))
               }
               className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:border-[var(--accent-primary)] cursor-pointer whitespace-nowrap"
             >
@@ -1006,7 +1090,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                const unmastered = activeWordList
+                const unmastered = filteredWords
                   .filter((w) => (userRecordsMap.get(w.id)?.status || 'unrated') !== 'mastered')
                   .slice(0, 100)
                   .map((w) => w.id);
@@ -1021,7 +1105,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const topSlice = activeWordList.slice(0, Math.max(100, selectedRowIds.size));
+                    const topSlice = filteredWords.slice(0, Math.max(100, selectedRowIds.size));
                     const next = new Set<string>();
                     for (const w of topSlice) {
                       if (!selectedRowIds.has(w.id)) next.add(w.id);
@@ -1043,7 +1127,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             )}
           </div>
           <span className="hidden md:inline text-[11px] text-[var(--text-muted)] whitespace-nowrap shrink-0">
-            按住勾选框上下滑动连续多选 · Shift+点击区间连选
+            按住勾选框上下滑动连续多选 · Shift+点击区间连选 · 空格键切换
           </span>
         </div>
       )}
@@ -1053,8 +1137,8 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         containerWidth >= 740 ? (
           <div className="grid grid-cols-[64px_minmax(120px,1.3fr)_88px_96px_minmax(100px,1fr)_96px_78px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
             <div>官方排名</div>
-            <div>词元 (Headword)</div>
-            <div>词性 (PoS)</div>
+            <div>词元</div>
+            <div>词性</div>
             <div className="text-right pr-3">COCA 频次</div>
             <div>占词头比</div>
             <div>BNC / 考纲</div>
@@ -1090,35 +1174,32 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         )
       ) : entityMode === 'official_entries' ? (
         containerWidth >= 720 ? (
-          <div className="grid grid-cols-[68px_minmax(135px,1.25fr)_118px_minmax(170px,1.8fr)_104px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
+          <div className="grid grid-cols-[68px_minmax(145px,1.25fr)_118px_minmax(180px,1.8fr)_104px] items-center px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
             <div>考纲等级</div>
-            <div>考纲核心词 · 主词性</div>
-            <div>COCA · BNC 词族</div>
-            <div>同组考纲派生词与变体 (点击查词)</div>
+            <div>考纲词目 · 对应词性</div>
+            <div>COCA · BNC</div>
+            <div>同词目派生/变体与考纲记录</div>
             <div className="text-right">组内掌握 / 状态</div>
           </div>
         ) : (
           <div className="grid grid-cols-[58px_minmax(110px,1.2fr)_minmax(120px,1.4fr)_76px] items-center px-3.5 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
             <div>等级</div>
-            <div>考纲核心词</div>
-            <div>同组派生词与变体</div>
+            <div>考纲词目</div>
+            <div>同词目派生与记录</div>
             <div className="text-right">状态</div>
           </div>
         )
       ) : !isCompactCardLayout ? (
         <div
-          className={`grid ${
-            isMediumTableLayout
-              ? 'grid-cols-[32px_minmax(125px,1.4fr)_126px_60px_minmax(96px,1fr)_74px]'
-              : 'grid-cols-[32px_minmax(136px,1.35fr)_128px_minmax(130px,1.2fr)_64px_minmax(100px,1fr)_76px_74px]'
-          } items-center px-3.5 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none`}
+          style={{ gridTemplateColumns: formsGridTemplate }}
+          className="grid items-center px-3.5 sm:px-4 py-2 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] text-[11px] font-semibold text-[var(--text-muted)] shrink-0 select-none"
         >
           <div className="flex items-center justify-center">
             <button
               type="button"
               onClick={() => {
                 if (selectedRowIds.size > 0) setSelectedRowIds(new Set());
-                else setSelectedRowIds(new Set(activeWordList.slice(0, 50).map((w) => w.id)));
+                else setSelectedRowIds(new Set(filteredWords.slice(0, 50).map((w) => w.id)));
               }}
               className="text-[var(--text-muted)] hover:text-[var(--accent-primary)] cursor-pointer"
               title="勾选前 50 项 / 清空选择"
@@ -1130,20 +1211,19 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               )}
             </button>
           </div>
-          <div>{entityMode === 'headwords' ? '词头 (Headword)' : '词形 (Word Form)'}</div>
-          <div>COCA 排名 · 频次</div>
-          {!isMediumTableLayout && <div>COCA 词性分布</div>}
-          <div>考纲</div>
-          <div>BNC 词族</div>
-          {!isMediumTableLayout && <div className="text-right pr-2">BNC 词频</div>}
+          <div>词形</div>
+          {visibleCols.cocaRank && <div>COCA 排名 · 频次</div>}
+          {!isMediumTableLayout && visibleCols.cocaPos && <div>COCA 词性分布</div>}
+          {visibleCols.cetLevel && <div>考纲</div>}
+          {visibleCols.bncFamily && <div>BNC 词族</div>}
+          {!isMediumTableLayout && visibleCols.bncFormFreq && (
+            <div className="text-right pr-2">BNC 词频</div>
+          )}
           <div className="text-right">状态</div>
         </div>
       ) : (
         <div className="px-3.5 py-1.5 bg-[var(--bg-subtle)]/70 border-b border-[var(--border-subtle)] flex items-center justify-between text-[11px] font-semibold text-[var(--text-muted)] shrink-0">
-          <span>
-            {entityMode === 'headwords' ? '词头列表' : '词形列表'} (
-            {activeListCount.toLocaleString()})
-          </span>
+          <span>词形列表 ({activeListCount.toLocaleString()})</span>
           <span>COCA · BNC · 状态</span>
         </div>
       )}
@@ -1181,7 +1261,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const rowIndex = virtualRow.index;
 
-              // ================= MODE A: COCA LEXEMES (60,000) =================
+              // ================= MODE 1: COCA LEXEMES (60,000) =================
               if (entityMode === 'lexemes') {
                 const lex = lexemeEntities[rowIndex];
                 if (!lex) return null;
@@ -1295,7 +1375,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 );
               }
 
-              // ================= MODE B: BNC FAMILIES (25,002) =================
+              // ================= MODE 2: BNC FAMILIES (25,002) =================
               if (entityMode === 'families') {
                 const fam = familyEntities[rowIndex];
                 if (!fam) return null;
@@ -1372,10 +1452,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 );
               }
 
-              // ================= MODE C: LEARNER-CENTRIC CET SYLLABUS GROUPS (5,377) =================
+              // ================= MODE 3: CET2016 OFFICIAL ENTRIES (5,377) =================
               if (entityMode === 'official_entries') {
-                const entry = cetEntryEntities[rowIndex];
-                if (!entry) return null;
+                const wrapped = cetEntryEntitiesWithHomographIdx[rowIndex];
+                if (!wrapped) return null;
+                const { entry, occurrenceIdx } = wrapped;
                 const expandedWords = Array.from(
                   new Set(entry.members.flatMap((m) => m.expandedForms))
                 );
@@ -1387,11 +1468,22 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     spelling: sw,
                     item: wordsMap.get(sw.toLowerCase()) || null,
                   }));
+
+                // Resolve distinct PoS & COCA rank for homograph entries (e.g., abstract¹ vs abstract²)
+                const resolvedHomograph = resolveCetEntryHomographLexeme(
+                  entry,
+                  coreWord,
+                  occurrenceIdx
+                );
+                const corePosMeta = resolvedHomograph.pos
+                  ? COCA_POS_META[resolvedHomograph.pos]
+                  : null;
+                const effectiveCocaRank =
+                  resolvedHomograph.rank ?? coreWord?.cocaBestPosRank ?? null;
+
                 const coreStatus: LearningStatus =
                   (coreWord && userRecordsMap.get(coreWord.id)?.status) || 'unrated';
                 const coreStatusMeta = LEARNING_STATUS_META[coreStatus];
-                const corePosMeta =
-                  coreWord?.cocaPrimaryPos ? COCA_POS_META[coreWord.cocaPrimaryPos] : null;
                 const masteredInGroup = expandedWords.filter(
                   (ew) => userRecordsMap.get(ew.toLowerCase())?.status === 'mastered'
                 ).length;
@@ -1410,7 +1502,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     }}
                     className={`grid ${
                       containerWidth >= 720
-                        ? 'grid-cols-[68px_minmax(135px,1.25fr)_118px_minmax(170px,1.8fr)_104px] px-4'
+                        ? 'grid-cols-[68px_minmax(145px,1.25fr)_118px_minmax(180px,1.8fr)_104px] px-4'
                         : 'grid-cols-[58px_minmax(110px,1.2fr)_minmax(120px,1.4fr)_76px] px-3.5'
                     } items-center border-b border-[var(--border-subtle)]/70 text-xs hover:bg-[var(--bg-hover)] cursor-pointer`}
                   >
@@ -1427,7 +1519,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Col 2: Core Syllabus Headword & Primary PoS */}
+                    {/* Col 2: Core Syllabus Headword & Homograph-Specific PoS */}
                     <div className="min-w-0 pr-2 flex items-center gap-1.5">
                       <span
                         translate="no"
@@ -1435,6 +1527,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       >
                         {coreWord?.word || coreWordStr}
                       </span>
+                      {resolvedHomograph.homographNum !== null && (
+                        <span className="px-1 py-0.2 rounded bg-amber-500/12 text-amber-700 dark:text-amber-300 text-[10px] font-mono-tabular font-semibold shrink-0">
+                          同形 #{resolvedHomograph.homographNum}
+                        </span>
+                      )}
                       {corePosMeta && (
                         <span
                           className={`px-1.5 py-0.2 rounded border text-[10px] font-mono-tabular font-semibold shrink-0 ${corePosMeta.badgeClass}`}
@@ -1442,19 +1539,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                           {corePosMeta.abbr}
                         </span>
                       )}
-                      {entry.members.some((m) => m.homographNumber !== null) && (
-                        <span className="px-1 py-0.2 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[9px] font-mono-tabular shrink-0">
-                          同形词
-                        </span>
-                      )}
                     </div>
 
-                    {/* Col 3: COCA Rank & BNC Family Band (hidden on <720px) */}
+                    {/* Col 3: Homograph-Specific COCA Rank & BNC Family Band (hidden on <720px) */}
                     {containerWidth >= 720 && (
                       <div className="font-mono-tabular text-[11px] pr-2 flex items-center gap-1.5 truncate">
-                        {coreWord?.cocaBestPosRank ? (
+                        {effectiveCocaRank ? (
                           <span className="font-semibold text-blue-600 dark:text-blue-400">
-                            #{coreWord.cocaBestPosRank.toLocaleString()}
+                            #{effectiveCocaRank.toLocaleString()}
                           </span>
                         ) : (
                           <span className="text-[var(--text-muted)]">—</span>
@@ -1467,10 +1559,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       </div>
                     )}
 
-                    {/* Col 4: Syllabus Sibling Derivatives & Variants */}
-                    <div className="flex items-center gap-1.5 overflow-hidden pr-2">
+                    {/* Col 4: Syllabus Sibling Derivatives & Official Entry Traceability */}
+                    <div className="flex flex-wrap items-center gap-1 pr-2 max-h-[46px] overflow-y-auto no-scrollbar">
                       {siblingWords.length > 0 ? (
-                        siblingWords.slice(0, 4).map(({ spelling, item }) => {
+                        siblingWords.map(({ spelling, item }) => {
                           const sPosMeta = item?.cocaPrimaryPos
                             ? COCA_POS_META[item.cocaPrimaryPos]
                             : null;
@@ -1485,7 +1577,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                                 e.stopPropagation();
                                 if (item) onSelectWord(item, true);
                               }}
-                              className="px-2 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                              className="px-1.5 py-0.5 rounded bg-[var(--bg-canvas)] border border-[var(--border-subtle)] hover:border-[var(--accent-primary)] text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
                             >
                               <span className="font-serif-lexicon font-medium text-[var(--text-primary)]">
                                 {spelling}
@@ -1497,11 +1589,6 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                                   {sPosMeta.abbr}
                                 </span>
                               )}
-                              {item?.cocaBestPosRank && (
-                                <span className="font-mono-tabular text-[10px] text-blue-600 dark:text-blue-400">
-                                  #{item.cocaBestPosRank}
-                                </span>
-                              )}
                               {sMastered && (
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               )}
@@ -1509,8 +1596,12 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                           );
                         })
                       ) : (
-                        <span className="text-[11px] text-[var(--text-muted)] truncate">
-                          独立考纲词目
+                        <span
+                          translate="no"
+                          className="text-[11px] font-mono-tabular text-[var(--text-muted)] truncate"
+                          title={`CET2016 原始词目 (#${entry.lineNumber}): ${entry.rawLine}`}
+                        >
+                          #{entry.lineNumber} · {entry.rawLine}
                         </span>
                       )}
                     </div>
@@ -1550,8 +1641,8 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 );
               }
 
-              // ================= MODE D & E: HEADWORDS OR FORMS =================
-              const word = activeWordList[rowIndex];
+              // ================= MODE 4: WORD FORMS (94,954) =================
+              const word = filteredWords[rowIndex];
               if (!word) return null;
               const userRec = userRecordsMap.get(word.id);
               const status: LearningStatus = userRec?.status || 'unrated';
@@ -1610,10 +1701,24 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                           : 'hover:bg-[var(--bg-hover)]'
                     }`}
                   >
-                    <div
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isChecked}
+                      aria-label={`选择 ${word.word}`}
                       onMouseDown={(e) =>
                         handleCheckboxMouseDown(e, rowIndex, word.id, isChecked)
                       }
+                      onTouchEnd={(e) => {
+                        e.stopPropagation();
+                        toggleSingleRowSelection(rowIndex, word.id, isChecked, false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === ' ' || e.key === 'Enter') {
+                          e.preventDefault();
+                          toggleSingleRowSelection(rowIndex, word.id, isChecked, e.shiftKey);
+                        }
+                      }}
                       onClick={(e) => e.stopPropagation()}
                       className="w-6 h-full flex items-center justify-center shrink-0 cursor-pointer"
                     >
@@ -1622,7 +1727,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                       ) : (
                         <Square className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                       )}
-                    </div>
+                    </button>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
@@ -1704,12 +1809,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     width: '100%',
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
+                    gridTemplateColumns: formsGridTemplate,
                   }}
-                  className={`group grid ${
-                    isMediumTableLayout
-                      ? 'grid-cols-[32px_minmax(125px,1.4fr)_126px_60px_minmax(96px,1fr)_74px]'
-                      : 'grid-cols-[32px_minmax(136px,1.35fr)_128px_minmax(130px,1.2fr)_64px_minmax(100px,1fr)_76px_74px]'
-                  } items-center px-3.5 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
+                  className={`group grid items-center px-3.5 sm:px-4 border-b border-[var(--border-subtle)]/70 text-xs cursor-pointer transition-colors ${
                     isChecked
                       ? 'bg-[var(--accent-soft)]/90'
                       : isSelected
@@ -1717,11 +1819,25 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         : 'hover:bg-[var(--bg-hover)]'
                   }`}
                 >
-                  {/* Col 1: Drag-Paint / Shift-Select Checkbox (Standard Pointer Cursor) */}
-                  <div
+                  {/* Col 1: Drag-Paint / Shift-Select / Touch / Keyboard Checkbox */}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={isChecked}
+                    aria-label={`选择 ${word.word}`}
                     onMouseDown={(e) =>
                       handleCheckboxMouseDown(e, rowIndex, word.id, isChecked)
                     }
+                    onTouchEnd={(e) => {
+                      e.stopPropagation();
+                      toggleSingleRowSelection(rowIndex, word.id, isChecked, false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        toggleSingleRowSelection(rowIndex, word.id, isChecked, e.shiftKey);
+                      }
+                    }}
                     onClick={(e) => e.stopPropagation()}
                     title="点击勾选 · 按住上下滑动连续多选 · Shift+点击区间连选"
                     className="h-full w-full flex items-center justify-center cursor-pointer"
@@ -1731,7 +1847,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     ) : (
                       <Square className="w-3.5 h-3.5 text-[var(--text-muted)] opacity-55 group-hover:opacity-100" />
                     )}
-                  </div>
+                  </button>
 
                   {/* Col 2: Word */}
                   <div className="min-w-0 pr-2 flex items-baseline gap-1.5">
@@ -1756,10 +1872,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     )}
                   </div>
 
-                  {/* Col 3: COCA Rank & Total Freq */}
-                  <div className="font-mono-tabular text-[11px] pr-2 whitespace-nowrap truncate">
-                    {visibleCols.cocaRank ? (
-                      word.inCoca && displayCocaRank !== null ? (
+                  {/* Col 3: COCA Rank & Total Freq (Omitted when hidden) */}
+                  {visibleCols.cocaRank && (
+                    <div className="font-mono-tabular text-[11px] pr-2 whitespace-nowrap truncate">
+                      {word.inCoca && displayCocaRank !== null ? (
                         <div className="flex items-center gap-1 truncate">
                           <span className="font-semibold text-blue-600 dark:text-blue-400">
                             #{displayCocaRank.toLocaleString()}
@@ -1781,14 +1897,12 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         </span>
                       ) : (
                         <span className="text-[var(--text-muted)]">—</span>
-                      )
-                    ) : (
-                      <span className="text-[var(--text-muted)]">隐藏</span>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
 
-                  {/* Col 4: COCA PoS Distribution (Semantic Color-Coded Badges for Learners) */}
-                  {!isMediumTableLayout && (
+                  {/* Col 4: COCA PoS Distribution (Omitted when hidden or medium layout) */}
+                  {!isMediumTableLayout && visibleCols.cocaPos && (
                     <div
                       className="min-w-0 pr-2 flex items-center gap-1 overflow-hidden"
                       title={
@@ -1800,7 +1914,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                           .join(' | ') || undefined
                       }
                     >
-                      {visibleCols.cocaPos && topLexemes.length > 0 ? (
+                      {topLexemes.length > 0 ? (
                         <>
                           {topLexemes.map((lex) => {
                             const pMeta = COCA_POS_META[lex.pos];
@@ -1832,10 +1946,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     </div>
                   )}
 
-                  {/* Col 5: CET Level (Semantic Colored Badges, No Star) */}
-                  <div className="font-mono-tabular text-[11px] whitespace-nowrap">
-                    {visibleCols.cetLevel ? (
-                      word.isCet4 && word.isCet6 ? (
+                  {/* Col 5: CET Level (Omitted when hidden) */}
+                  {visibleCols.cetLevel && (
+                    <div className="font-mono-tabular text-[11px] whitespace-nowrap">
+                      {word.isCet4 && word.isCet6 ? (
                         <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70">
                           CET-4/6
                         </span>
@@ -1849,51 +1963,51 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                         </span>
                       ) : (
                         <span className="text-[var(--text-muted)]">—</span>
-                      )
-                    ) : (
-                      <span className="text-[var(--text-muted)]">—</span>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
 
-                  {/* Col 6: BNC Family & Band */}
-                  <div className="min-w-0 pr-2 flex items-center gap-1 font-mono-tabular text-[11px]">
-                    {visibleCols.bncFamily && word.headword ? (
-                      <>
-                        {word.band && (
-                          <span
-                            className={`px-1 py-0.2 rounded text-[10px] font-semibold shrink-0 ${
-                              (word.bandNumber || 99) <= 3
-                                ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
-                                : (word.bandNumber || 99) <= 9
-                                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                                  : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)]'
-                            }`}
+                  {/* Col 6: BNC Family & Band (Omitted when hidden) */}
+                  {visibleCols.bncFamily && (
+                    <div className="min-w-0 pr-2 flex items-center gap-1 font-mono-tabular text-[11px]">
+                      {word.headword ? (
+                        <>
+                          {word.band && (
+                            <span
+                              className={`px-1 py-0.2 rounded text-[10px] font-semibold shrink-0 ${
+                                (word.bandNumber || 99) <= 3
+                                  ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                                  : (word.bandNumber || 99) <= 9
+                                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                    : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)]'
+                              }`}
+                            >
+                              {word.band}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            translate="no"
+                            tabIndex={-1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (word.familyId) onInspectFamily(word.familyId, word.id);
+                            }}
+                            className="text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:underline truncate cursor-pointer"
                           >
-                            {word.band}
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          translate="no"
-                          tabIndex={-1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (word.familyId) onInspectFamily(word.familyId, word.id);
-                          }}
-                          className="text-[var(--text-secondary)] hover:text-[var(--accent-primary)] hover:underline truncate cursor-pointer"
-                        >
-                          {word.headword}
-                        </button>
-                      </>
-                    ) : (
-                      <span className="text-[var(--text-muted)]">—</span>
-                    )}
-                  </div>
+                            {word.headword}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </div>
+                  )}
 
-                  {/* Col 7: BNC Form Freq */}
-                  {!isMediumTableLayout && (
+                  {/* Col 7: BNC Form Freq (Omitted when hidden) */}
+                  {!isMediumTableLayout && visibleCols.bncFormFreq && (
                     <div className="pr-2 text-right font-mono-tabular text-[11px] whitespace-nowrap text-[var(--text-secondary)]">
-                      {visibleCols.bncFormFreq ? bncFreqText : '—'}
+                      {bncFreqText}
                     </div>
                   )}
 
@@ -1931,7 +2045,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       </div>
 
       {/* Floating Bottom Batch Action Dock (Never shifts table height when appearing) */}
-      {(entityMode === 'forms' || entityMode === 'headwords') && selectedRowIds.size > 0 && (
+      {entityMode === 'forms' && selectedRowIds.size > 0 && (
         <div
           role="region"
           aria-label="已选词条批量操作栏"
@@ -1948,9 +2062,18 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 <button
                   key={st}
                   type="button"
-                  onClick={() => {
-                    onBatchSetStatus(Array.from(selectedRowIds), st, '检索视图底部批量标注');
-                    setSelectedRowIds(new Set());
+                  onClick={async () => {
+                    try {
+                      setBatchError(null);
+                      await onBatchSetStatus(
+                        Array.from(selectedRowIds),
+                        st,
+                        '检索视图底部批量标注'
+                      );
+                      setSelectedRowIds(new Set());
+                    } catch (err) {
+                      setBatchError(err instanceof Error ? err.message : '批量更新状态失败');
+                    }
                   }}
                   className={`px-2 py-1 rounded border text-[11px] font-semibold cursor-pointer whitespace-nowrap transition-transform active:scale-95 ${stMeta.badgeClass}`}
                 >
@@ -1964,11 +2087,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             <select
               aria-label="将已选词加入词集"
               defaultValue=""
-              onChange={(e) => {
+              onChange={async (e) => {
                 const colId = e.target.value;
                 if (!colId) return;
-                onAddWordsToStaticCollection(colId, Array.from(selectedRowIds));
                 e.currentTarget.value = '';
+                try {
+                  setBatchError(null);
+                  await onAddWordsToStaticCollection(colId, Array.from(selectedRowIds));
+                } catch (err) {
+                  setBatchError(err instanceof Error ? err.message : '加入词集失败');
+                }
               }}
               className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[11px] font-medium text-[var(--text-secondary)] cursor-pointer"
             >
@@ -1988,10 +2116,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               type="text"
               value={batchTagInput}
               onChange={(e) => setBatchTagInput(e.target.value)}
-              onKeyDown={(e) => {
+              onKeyDown={async (e) => {
                 if (e.key === 'Enter' && batchTagInput.trim()) {
-                  onBatchAddTag(Array.from(selectedRowIds), batchTagInput.trim());
-                  setBatchTagInput('');
+                  const tagVal = batchTagInput.trim();
+                  try {
+                    setBatchError(null);
+                    await onBatchAddTag(Array.from(selectedRowIds), tagVal);
+                    setBatchTagInput('');
+                  } catch (err) {
+                    setBatchError(err instanceof Error ? err.message : '批量添加标签失败');
+                  }
                 }
               }}
               placeholder="批量打标签…"
@@ -2000,9 +2134,15 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             {batchTagInput.trim() && (
               <button
                 type="button"
-                onClick={() => {
-                  onBatchAddTag(Array.from(selectedRowIds), batchTagInput.trim());
-                  setBatchTagInput('');
+                onClick={async () => {
+                  const tagVal = batchTagInput.trim();
+                  try {
+                    setBatchError(null);
+                    await onBatchAddTag(Array.from(selectedRowIds), tagVal);
+                    setBatchTagInput('');
+                  } catch (err) {
+                    setBatchError(err instanceof Error ? err.message : '批量添加标签失败');
+                  }
                 }}
                 className="px-2 py-1 rounded bg-[var(--accent-primary)] text-white text-[11px] font-semibold cursor-pointer"
               >
@@ -2010,6 +2150,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               </button>
             )}
           </div>
+
+          {batchError && (
+            <span className="text-[11px] text-rose-600 inline-flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>{batchError}</span>
+            </span>
+          )}
 
           <button
             type="button"
@@ -2086,9 +2233,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (!newCollectionName.trim()) return;
-                  onSaveDynamicCollection(
+                  await onSaveDynamicCollection(
                     newCollectionName.trim(),
                     newCollectionDesc.trim() || '自定义多源动态规则词集'
                   );

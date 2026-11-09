@@ -14,6 +14,7 @@ import {
   CLOSED_CLASS_STOPWORDS,
   computeLexiconAnalytics,
   DEFAULT_FILTER_CRITERIA,
+  formatLocalDateKey,
 } from '../data/searchAndFilter.ts';
 
 interface AnalyticsViewProps {
@@ -93,18 +94,19 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     const countsByDate = new Map<string, number>();
 
     for (const log of activityLogs) {
-      const d = log.timestamp.slice(0, 10);
-      countsByDate.set(d, (countsByDate.get(d) || 0) + 1);
+      const localKey = formatLocalDateKey(log.timestamp);
+      if (localKey) {
+        countsByDate.set(localKey, (countsByDate.get(localKey) || 0) + 1);
+      }
     }
 
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      const iso = d.toISOString().slice(0, 10);
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const localKey = formatLocalDateKey(d);
       days.push({
-        dateStr: iso,
-        label: iso.slice(5),
-        count: countsByDate.get(iso) || 0,
+        dateStr: localKey,
+        label: localKey.slice(5),
+        count: countsByDate.get(localKey) || 0,
       });
     }
     return days;
@@ -179,7 +181,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             {/* Layer 2: Form Mastery */}
             <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
               <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
-                2. 词形级掌握 (94,954 Forms)
+                2. 词形级掌握 ({words.length.toLocaleString()} Forms)
               </div>
               <div className="mt-1 text-lg font-bold text-[var(--text-primary)]">
                 {stats.statusCounts.mastered.toLocaleString()}{' '}
@@ -211,7 +213,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             {/* Layer 4: BNC 25k Family Mastery */}
             <div className="p-3 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)]">
               <div className="text-[11px] font-sans font-medium text-[var(--text-secondary)]">
-                4. BNC 词族掌握 (25,002 族)
+                4. BNC 词族掌握 ({families.length.toLocaleString()} 族)
               </div>
               <div className="mt-1 text-lg font-bold text-teal-600 dark:text-teal-400">
                 {stats.bncFamiliesPartialMastered.toLocaleString()}{' '}

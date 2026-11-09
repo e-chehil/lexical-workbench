@@ -567,8 +567,8 @@ export const WordFamilyView: React.FC<WordFamilyViewProps> = ({
                 </div>
 
                 {/* Interactive SVG Radial / Layered Relation Graph */}
-                <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] p-3 overflow-hidden">
-                  <svg viewBox="0 0 720 340" className="w-full h-64 sm:h-72">
+                <div className="border border-[var(--border-subtle)] rounded-lg bg-[var(--bg-canvas)] p-3 overflow-x-auto">
+                  <svg viewBox="0 0 720 340" className="w-full min-w-[540px] h-64 sm:h-72">
                     {/* Center Node: Family Headword */}
                     <g
                       onClick={() => headwordItem && onSelectWord(headwordItem)}

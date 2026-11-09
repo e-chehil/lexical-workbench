@@ -86,11 +86,11 @@ export const DEFAULT_DICTIONARIES: DictionaryTemplate[] = [
     isBuiltIn: true,
   },
   {
-    id: 'youdao',
-    name: 'Youdao Dictionary (有道词典)',
-    shortName: '有道词典',
-    description: '支持四六级真题例句与中文快速检索',
-    urlTemplate: 'https://dict.youdao.com/result?word={word}&lang=en',
+    id: 'britannica',
+    name: 'Britannica Dictionary (大英百科词典)',
+    shortName: 'Britannica',
+    description: '大英百科旗下美式英语学习词典，核心词义清晰、例句地道实用',
+    urlTemplate: 'https://www.britannica.com/dictionary/{word}',
     enabled: true,
     isBuiltIn: true,
   },
@@ -152,10 +152,10 @@ export function computeStudyPriorityScore(
 
   if (word.isCet4) {
     score += 460;
-    reasons.push('CET-4 核心');
+    reasons.push('CET-4 大纲');
   } else if (word.isCet6) {
     score += 340;
-    reasons.push('CET-6 进阶');
+    reasons.push(word.isCet6Only ? 'CET-6 新增' : 'CET-6 大纲');
   }
 
   // COCA high-frequency signal (kept distinct from BNC band signal)
@@ -234,6 +234,15 @@ export interface MultiObjectiveWeights {
   gapWeight: number; // 0..100
 }
 
+export const STRATEGY_DEFAULT_WEIGHTS: Record<MultiObjectiveStrategyId, MultiObjectiveWeights> = {
+  coca_high_freq: { cocaWeight: 60, bncWeight: 10, cetWeight: 10, gapWeight: 20 },
+  bnc_family_value: { cocaWeight: 15, bncWeight: 55, cetWeight: 15, gapWeight: 15 },
+  cet_syllabus: { cocaWeight: 20, bncWeight: 15, cetWeight: 50, gapWeight: 15 },
+  high_freq_gap: { cocaWeight: 40, bncWeight: 10, cetWeight: 10, gapWeight: 40 },
+  family_completion: { cocaWeight: 20, bncWeight: 40, cetWeight: 20, gapWeight: 20 },
+  custom_multi_objective: { cocaWeight: 35, bncWeight: 25, cetWeight: 25, gapWeight: 15 },
+};
+
 export interface StudyPlanCandidate {
   word: LexiconWordItem;
   status: LearningStatus;
@@ -245,7 +254,7 @@ export interface StudyPlanCandidate {
     knowledgeGapValue: number; // 0..100 based on status, unmastered high-freq gap, or family completion
   };
   compositeScore: number; // Weighted sum of the 0..100 normalized dimensions
-  isParetoOptimal: boolean; // True if no other candidate dominates this word across all 4 dimensions
+  isParetoOptimal: boolean; // True if no other candidate in the candidate pool dominates this word across all 4 dimensions
   explainableReasons: string[];
 }
 
@@ -259,10 +268,12 @@ export function computeMultiObjectiveStudyCandidates(
     excludeStopwords?: boolean;
     onlyHeadwords?: boolean;
     maxCandidatesPool?: number;
+    alwaysIncludeWordIds?: Set<string>;
   }
 ): StudyPlanCandidate[] {
   const excludeStopwords = options.excludeStopwords ?? true;
   const onlyHeadwords = options.onlyHeadwords ?? false;
+  const alwaysInclude = options.alwaysIncludeWordIds;
 
   // Pre-compute family mastery ratios for family_completion & gap evaluation
   const familyMasteryStats = new Map<
@@ -283,35 +294,11 @@ export function computeMultiObjectiveStudyCandidates(
     });
   }
 
-  let weights: MultiObjectiveWeights = {
-    cocaWeight: 35,
-    bncWeight: 25,
-    cetWeight: 25,
-    gapWeight: 15,
-  };
-
-  switch (options.strategy) {
-    case 'coca_high_freq':
-      weights = { cocaWeight: 70, bncWeight: 10, cetWeight: 10, gapWeight: 10 };
-      break;
-    case 'bnc_family_value':
-      weights = { cocaWeight: 15, bncWeight: 65, cetWeight: 10, gapWeight: 10 };
-      break;
-    case 'cet_syllabus':
-      weights = { cocaWeight: 20, bncWeight: 15, cetWeight: 55, gapWeight: 10 };
-      break;
-    case 'high_freq_gap':
-      weights = { cocaWeight: 45, bncWeight: 20, cetWeight: 15, gapWeight: 20 };
-      break;
-    case 'family_completion':
-      weights = { cocaWeight: 15, bncWeight: 30, cetWeight: 15, gapWeight: 40 };
-      break;
-    case 'custom_multi_objective':
-      if (options.customWeights) {
-        weights = options.customWeights;
-      }
-      break;
-  }
+  // Always honor options.customWeights when provided; only fall back to preset weights when omitted
+  const weights: MultiObjectiveWeights =
+    options.customWeights ??
+    STRATEGY_DEFAULT_WEIGHTS[options.strategy] ??
+    STRATEGY_DEFAULT_WEIGHTS.custom_multi_objective;
 
   const totalW =
     Math.max(1, weights.cocaWeight + weights.bncWeight + weights.cetWeight + weights.gapWeight);
@@ -320,33 +307,40 @@ export function computeMultiObjectiveStudyCandidates(
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
+    const isPinned = Boolean(alwaysInclude && alwaysInclude.has(w.id));
     const rec = userRecordsMap.get(w.id);
     const status: LearningStatus = rec?.status || 'unrated';
 
-    // Skip already mastered or deferred words
-    if (status === 'mastered' || status === 'deferred') continue;
+    // Skip already mastered or deferred words unless explicitly locked/pinned by the user
+    if (!isPinned && (status === 'mastered' || status === 'deferred')) continue;
 
-    if (excludeStopwords && (w.normalized.length <= 1 || CLOSED_CLASS_STOPWORDS.has(w.normalized))) {
+    if (
+      !isPinned &&
+      excludeStopwords &&
+      (w.normalized.length <= 1 || CLOSED_CLASS_STOPWORDS.has(w.normalized))
+    ) {
       continue;
     }
-    if (onlyHeadwords && !w.isHeadword && !w.inCoca) {
+    if (!isPinned && onlyHeadwords && !w.isHeadword && !w.inCoca) {
       continue;
     }
 
-    // Strategy-specific hard pre-filters so each strategy focuses on relevant candidates
-    if (options.strategy === 'coca_high_freq' && !w.inCoca) continue;
-    if (options.strategy === 'bnc_family_value' && !w.inBnc) continue;
-    if (options.strategy === 'cet_syllabus' && !w.inCet) continue;
-    if (options.strategy === 'high_freq_gap') {
-      const isCocaHigh = w.inCoca && (w.cocaHeadwordDerivedRank ?? 99999) <= 8000;
-      const isBncHigh = w.inBnc && (w.bandNumber ?? 99) <= 4;
-      if (!isCocaHigh && !isBncHigh) continue;
-    }
-    if (options.strategy === 'family_completion') {
-      if (!w.familyId) continue;
-      const famStat = familyMasteryStats.get(w.familyId);
-      if (!famStat || famStat.masteredCount === 0 || famStat.masteredCount === famStat.totalCount) {
-        continue;
+    // Strategy-specific hard pre-filters (bypassed for user-locked words so locked words survive strategy switches)
+    if (!isPinned) {
+      if (options.strategy === 'coca_high_freq' && !w.inCoca) continue;
+      if (options.strategy === 'bnc_family_value' && !w.inBnc) continue;
+      if (options.strategy === 'cet_syllabus' && !w.inCet) continue;
+      if (options.strategy === 'high_freq_gap') {
+        const isCocaHigh = w.inCoca && (w.cocaHeadwordDerivedRank ?? 99999) <= 8000;
+        const isBncHigh = w.inBnc && (w.bandNumber ?? 99) <= 4;
+        if (!isCocaHigh && !isBncHigh) continue;
+      }
+      if (options.strategy === 'family_completion') {
+        if (!w.familyId) continue;
+        const famStat = familyMasteryStats.get(w.familyId);
+        if (!famStat || famStat.masteredCount === 0 || famStat.masteredCount === famStat.totalCount) {
+          continue;
+        }
       }
     }
 
@@ -417,9 +411,9 @@ export function computeMultiObjectiveStudyCandidates(
       );
     }
     if (w.isCet4) {
-      explainableReasons.push('CET-4 大纲核心');
+      explainableReasons.push('CET-4 大纲收录');
     } else if (w.isCet6) {
-      explainableReasons.push(w.isCet6Only ? 'CET-6 新增核心' : 'CET-6 大纲词');
+      explainableReasons.push(w.isCet6Only ? 'CET-6 新增收录' : 'CET-6 大纲收录');
     }
     if (w.band) {
       explainableReasons.push(
@@ -456,9 +450,21 @@ export function computeMultiObjectiveStudyCandidates(
     return a.word.normalized.localeCompare(b.word.normalized);
   });
 
-  const topPool = candidates.slice(0, options.maxCandidatesPool ?? 300);
+  const poolLimit = options.maxCandidatesPool ?? 300;
+  const topPool = candidates.slice(0, poolLimit);
 
-  // Compute Pareto Frontier among the top candidate pool
+  // If any user-locked word fell outside the top poolLimit, append it so it is never lost
+  if (alwaysInclude && alwaysInclude.size > 0) {
+    const inTopSet = new Set(topPool.map((c) => c.word.id));
+    for (let i = poolLimit; i < candidates.length; i++) {
+      if (alwaysInclude.has(candidates[i].word.id) && !inTopSet.has(candidates[i].word.id)) {
+        topPool.push(candidates[i]);
+        inTopSet.add(candidates[i].word.id);
+      }
+    }
+  }
+
+  // Compute Pareto Frontier within the current candidate pool
   for (let i = 0; i < topPool.length; i++) {
     const a = topPool[i].dimensions;
     let dominated = false;
@@ -2133,3 +2139,78 @@ export function computeLexiconAnalytics(
     bncFamiliesFullMastered,
   };
 }
+
+/**
+ * Prunes a selection Set so that only IDs present in the currently visible filtered list remain.
+ * Prevents batch operations from silently mutating hidden rows after a search or filter change.
+ */
+export function pruneSelectionToVisibleIds(
+  selectedIds: Set<string>,
+  visibleItems: ReadonlyArray<{ id: string }>
+): Set<string> {
+  if (selectedIds.size === 0) return selectedIds;
+  const visibleSet = new Set(visibleItems.map((item) => item.id));
+  let changed = false;
+  const next = new Set<string>();
+  for (const id of selectedIds) {
+    if (visibleSet.has(id)) {
+      next.add(id);
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? next : selectedIds;
+}
+
+/**
+ * Resolves the distinct COCA PoS and rank for a CET2016 official entry, differentiating
+ * homograph entries (e.g., abstract¹ vs abstract², bear¹ vs bear²) by selecting the
+ * corresponding k-th PoS lexeme from `coreWord.cocaLexemes` (sorted by frequency).
+ */
+export function resolveCetEntryHomographLexeme(
+  entry: CetOfficialEntry,
+  coreWord: LexiconWordItem | null,
+  occurrenceIndexZeroBased = 0
+): { pos: import('./types.ts').CocaRawPos | null; rank: number | null; homographNum: number | null } {
+  const homographNum =
+    entry.members.find((m) => m.homographNumber !== null)?.homographNumber ?? null;
+
+  if (!coreWord) {
+    return { pos: null, rank: null, homographNum };
+  }
+
+  const lexemes = coreWord.cocaLexemes || [];
+  if (lexemes.length === 0) {
+    return {
+      pos: coreWord.cocaPrimaryPos ?? null,
+      rank: coreWord.cocaBestPosRank ?? null,
+      homographNum,
+    };
+  }
+
+  // Determine 0-based index into cocaLexemes: prefer explicit homographNumber - 1, else occurrenceIndexZeroBased
+  const desiredIdx =
+    homographNum !== null && homographNum >= 1
+      ? Math.min(homographNum - 1, lexemes.length - 1)
+      : Math.min(Math.max(0, occurrenceIndexZeroBased), lexemes.length - 1);
+
+  const chosen = lexemes[desiredIdx] || lexemes[0];
+  return {
+    pos: chosen.pos,
+    rank: chosen.rank,
+    homographNum,
+  };
+}
+
+/**
+ * Formats a Date or ISO timestamp into a local timezone YYYY-MM-DD key (avoiding UTC day-shift bugs).
+ */
+export function formatLocalDateKey(input: Date | string): string {
+  const d = typeof input === 'string' ? new Date(input) : input;
+  if (Number.isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+

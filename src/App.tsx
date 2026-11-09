@@ -94,18 +94,18 @@ export function App() {
   const prevIsWideRef = useRef<boolean>(
     typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
   );
+  const userManuallyClosedDrawerOnWideRef = useRef<boolean>(false);
 
   useEffect(() => {
     const handleResize = () => {
       const isWide = window.innerWidth >= 1280;
       if (prevIsWideRef.current && !isWide) {
         setIsDrawerOpen(false);
-      } else if (!prevIsWideRef.current && isWide) {
+      } else if (!prevIsWideRef.current && isWide && !userManuallyClosedDrawerOnWideRef.current) {
         setIsDrawerOpen(true);
       }
       prevIsWideRef.current = isWide;
     };
-    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -138,7 +138,12 @@ export function App() {
       const raw = localStorage.getItem(DICT_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const britannicaDef = DEFAULT_DICTIONARIES.find((d) => d.id === 'britannica');
+          return parsed.map((d: DictionaryTemplate) =>
+            d.id === 'youdao' && britannicaDef ? britannicaDef : d
+          );
+        }
       }
     } catch {
       // ignore
@@ -734,7 +739,15 @@ export function App() {
           {selectedWord && activeTab !== 'insights' && (
             <button
               type="button"
-              onClick={() => setIsDrawerOpen((o) => !o)}
+              onClick={() =>
+                setIsDrawerOpen((o) => {
+                  const next = !o;
+                  if (typeof window !== 'undefined' && window.innerWidth >= 1280) {
+                    userManuallyClosedDrawerOnWideRef.current = !next;
+                  }
+                  return next;
+                })
+              }
               className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-ring ${
                 isDrawerOpen
                   ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)] text-[var(--accent-primary)] font-semibold'
@@ -1022,13 +1035,23 @@ export function App() {
         {isDrawerOpen && selectedWord && activeTab !== 'insights' && (
           <>
             <div
-              onClick={() => setIsDrawerOpen(false)}
+              onClick={() => {
+                setIsDrawerOpen(false);
+                if (typeof window !== 'undefined' && window.innerWidth >= 1280) {
+                  userManuallyClosedDrawerOnWideRef.current = true;
+                }
+              }}
               className="sm:hidden fixed inset-0 top-12 bottom-12 bg-slate-950/30 z-30"
               aria-hidden="true"
             />
             <WordDetailDrawer
               word={selectedWord}
-              onClose={() => setIsDrawerOpen(false)}
+              onClose={() => {
+                setIsDrawerOpen(false);
+                if (typeof window !== 'undefined' && window.innerWidth >= 1280) {
+                  userManuallyClosedDrawerOnWideRef.current = true;
+                }
+              }}
               wordsMap={wordsMap}
               familiesMap={familiesMap}
               userRecord={userRecordsMap.get(selectedWord.id)}

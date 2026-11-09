@@ -945,5 +945,104 @@ test('Lexical Workbench 2.0: CorpusObservations, LexicalRelations, Top-5k Dual M
   assert.ok(candidates[0].dimensions.cocaValue >= 0 && candidates[0].dimensions.cocaValue <= 100);
 });
 
+test('Quality Audit Regression Suite: Study Planner weights across strategies, locked word preservation, selection pruning, CET homograph PoS differentiation, and Britannica dictionary', async () => {
+  const {
+    DEFAULT_DICTIONARIES,
+    formatLocalDateKey,
+    pruneSelectionToVisibleIds,
+    resolveCetEntryHomographLexeme,
+  } = await import('./searchAndFilter.ts');
+
+  // 1. Verify Britannica Dictionary replaced Youdao in DEFAULT_DICTIONARIES
+  assert.ok(DEFAULT_DICTIONARIES.some((d) => d.id === 'britannica'));
+  assert.ok(!DEFAULT_DICTIONARIES.some((d) => d.id === 'youdao'));
+  const brit = DEFAULT_DICTIONARIES.find((d) => d.id === 'britannica')!;
+  assert.equal(
+    buildDictionaryUrl(brit.urlTemplate, '★appropriate²'),
+    'https://www.britannica.com/dictionary/appropriate'
+  );
+
+  // 2. Verify Study Planner slider weight adjustments change compositeScore even under non-custom preset strategies
+  const sampleCet = `able\tability\nappropriate¹\n★appropriate²\tappropriation`;
+  const sampleBnc = `List \tHeadword \tRelated forms\tTotal frequency
+1k\table\t"able (29930), abilities (1334), ability (9113)"\t40377
+2k\tappropriate\t"appropriate (10000), appropriately (2000), appropriation (500)"\t12500
+8k\trarecoca\t"rarecoca (50)"\t50`;
+  const sampleCoca = JSON.stringify([
+    {
+      headword: 'rarecoca',
+      content: [{ PoS: 'noun', Rank: '100', Freq: '95000' }],
+    },
+    {
+      headword: 'able',
+      content: [{ PoS: 'adjective', Rank: '450', Freq: '40000' }],
+    },
+    {
+      headword: 'appropriate',
+      content: [
+        { PoS: 'adjective', Rank: '1200', Freq: '18000' },
+        { PoS: 'verb', Rank: '4800', Freq: '3200' },
+      ],
+    },
+  ]);
+
+  const bundle = buildLexiconDatabase(sampleCet, sampleBnc, sampleCoca);
+  const wordsMap = new Map(bundle.words.map((w) => [w.id, w]));
+  const familiesMap = new Map(bundle.families.map((f) => [f.id, f]));
+
+  // Under preset strategy 'coca_high_freq', changing customWeights from COCA-heavy to CET-heavy MUST change compositeScore & order
+  const cocaHeavy = computeMultiObjectiveStudyCandidates(bundle.words, familiesMap, new Map(), {
+    strategy: 'coca_high_freq',
+    customWeights: { cocaWeight: 100, bncWeight: 0, cetWeight: 0, gapWeight: 0 },
+  });
+  const cetHeavy = computeMultiObjectiveStudyCandidates(bundle.words, familiesMap, new Map(), {
+    strategy: 'coca_high_freq',
+    customWeights: { cocaWeight: 0, bncWeight: 0, cetWeight: 100, gapWeight: 0 },
+  });
+
+  const rareInCocaHeavy = cocaHeavy.find((c) => c.word.id === 'rarecoca')!;
+  const rareInCetHeavy = cetHeavy.find((c) => c.word.id === 'rarecoca')!;
+  assert.ok(rareInCocaHeavy.compositeScore > rareInCetHeavy.compositeScore);
+  assert.equal(cocaHeavy[0].word.id, 'rarecoca');
+  assert.equal(cetHeavy[0].word.id, 'able');
+
+  // 3. Verify locked word (alwaysIncludeWordIds) is preserved even when switching to 'cet_syllabus' where 'rarecoca' is not in CET
+  const cetWithLockedRare = computeMultiObjectiveStudyCandidates(
+    bundle.words,
+    familiesMap,
+    new Map(),
+    {
+      strategy: 'cet_syllabus',
+      alwaysIncludeWordIds: new Set(['rarecoca']),
+    }
+  );
+  assert.ok(cetWithLockedRare.some((c) => c.word.id === 'rarecoca'));
+
+  // 4. Verify pruneSelectionToVisibleIds removes hidden IDs when filter narrows visible words
+  const initialSelected = new Set(['able', 'appropriate', 'rarecoca']);
+  const narrowedVisible = [{ id: 'able' }, { id: 'ability' }];
+  const pruned = pruneSelectionToVisibleIds(initialSelected, narrowedVisible);
+  assert.deepEqual(Array.from(pruned), ['able']);
+
+  // 5. Verify resolveCetEntryHomographLexeme differentiates homograph entries (appropriate¹ vs ★appropriate²)
+  const appropWord = wordsMap.get('appropriate')!;
+  const entry1 = bundle.cetEntries.find((e) => e.members[0].homographNumber === 1)!;
+  const entry2 = bundle.cetEntries.find((e) => e.members[0].homographNumber === 2)!;
+
+  const resolved1 = resolveCetEntryHomographLexeme(entry1, appropWord, 0);
+  const resolved2 = resolveCetEntryHomographLexeme(entry2, appropWord, 1);
+  assert.equal(resolved1.homographNum, 1);
+  assert.equal(resolved1.pos, 'adjective');
+  assert.equal(resolved1.rank, 1200);
+
+  assert.equal(resolved2.homographNum, 2);
+  assert.equal(resolved2.pos, 'verb');
+  assert.equal(resolved2.rank, 4800);
+
+  // 6. Verify formatLocalDateKey produces local YYYY-MM-DD
+  const localSample = new Date(2026, 2, 5, 23, 30, 0); // March 5, 2026 23:30 local time
+  assert.equal(formatLocalDateKey(localSample), '2026-03-05');
+});
+
 
 
